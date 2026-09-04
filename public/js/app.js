@@ -38,7 +38,8 @@ $("#nav").onclick=e=>{
   if(b.dataset.page==="dashboard") loadDashboard();
   else if(b.dataset.page==="pneus") loadPneus();
   else if(b.dataset.page==="ordens-servico") loadOrdensServico();
-  else if(b.dataset.page==="manutencoes") loadManutencao();
+  else if(b.dataset.page==="manutencao-caminhoes") loadManutencaoCategoria("CAMINHAO");
+  else if(b.dataset.page==="manutencao-empilhadeiras") loadManutencaoCategoria("EMPILHADEIRA");
   else loadList(b.dataset.page,b.textContent.trim());
 };
 
@@ -405,12 +406,12 @@ async function imprimirOS(id){
 async function salvarItemOS(id,body){try{await api(`/api/ordens-servico-itens/${id}`,{method:"PUT",body:JSON.stringify(body)});}catch(e){alert(e.message)}}
 
 
-async function loadManutencao(){
-  $("#pageTitle").textContent="Manutenção";
+async function loadManutencaoCategoria(categoria="CAMINHAO"){
+  $("#pageTitle").textContent=categoria==="EMPILHADEIRA"?"Manutenção de Empilhadeiras":"Manutenção de Caminhões";
   $("#content").innerHTML=`<section class="panel"><h3>🛠 Gestão de manutenção por veículo</h3><p>Carregando histórico...</p></section>`;
   try{
-    const vs=await api("/api/manutencao/veiculos");
-    window.__manutVeiculos=vs;
+    const vs=await api(`/api/manutencao/ativos/${categoria}`);
+    window.__manutVeiculos=vs; window.__manutCategoria=categoria;
     $("#content").innerHTML=`
       <section class="panel manut-top">
         <div class="os-head"><div><h3>🚚 Veículos</h3><p>Clique no veículo para abrir o histórico individual.</p></div>
@@ -464,7 +465,9 @@ async function carregarPainelManutencao(){
 
   $("#manDashboard").innerHTML=`
     ${prefixo?`<section class="panel selected-vehicle">
-      <div><h2>🚚 Veículo ${escapeHtml(prefixo)}</h2><p>Histórico individual de manutenção${veiculoInfo?.placa?` • Placa ${escapeHtml(veiculoInfo.placa)}`:""}</p></div>
+      <div><h2>${window.__manutCategoria==="EMPILHADEIRA"?"🏗 Empilhadeira":"🚚 Veículo"} ${escapeHtml(prefixo)}</h2>
+      <p><b>Placa/ID:</b> ${escapeHtml(veiculoInfo?.placa||"-")} • <b>Modelo:</b> ${escapeHtml(veiculoInfo?.modelo||"-")} • <b>Ano:</b> ${escapeHtml(veiculoInfo?.ano||"-")}</p>
+      <p><b>Tipo:</b> ${escapeHtml(veiculoInfo?.tipo||"-")} • <b>Função:</b> ${escapeHtml(veiculoInfo?.funcao||"-")}</p></div>
       <div><b>${hist.length}</b><small> serviços no filtro</small></div>
       <div><b>R$ ${total.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</b><small> gasto no período</small></div>
     </section>`:""}

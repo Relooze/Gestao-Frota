@@ -1,12 +1,10 @@
-# Gestão de Frota V2.3.1 — Correção Manutenção Individual
-
-Correção do módulo Manutenção:
-- clique no botão do veículo passa a selecionar explicitamente o prefixo;
-- histórico é filtrado pelo veículo também no navegador, inclusive para registros antigos importados;
-- painel mostra claramente o veículo selecionado;
-- gasto, quantidade e ticket médio passam a refletir o veículo selecionado;
-- rankings de serviços e empresas também ficam individuais;
-- histórico detalhado mostra uma linha por serviço com data, veículo, serviço, sistema, descrição/item, loja/empresa, NF, local e valor;
-- filtros de período, empresa e serviço continuam funcionando.
-
-Substitua os arquivos do pacote no GitHub. Não apague o PostgreSQL.
+# Gestão de Frota V2.4
+Atualizada com HISTORICO DA FROTA V3.xlsx.
+- 27 caminhões cadastrados.
+- 12 empilhadeiras cadastradas.
+- 360 lançamentos detalhados de manutenção importados.
+- Abas separadas para Caminhões e Empilhadeiras.
+- Cadastro mostra placa/ID, modelo, ano, tipo e função.
+- Histórico mostra serviço, sistema, produto/descrição, empresa, NF, local e valor.
+- Importações antigas de planilha são substituídas para evitar duplicidade; lançamentos manuais são preservados.
+Não apague o PostgreSQL.
