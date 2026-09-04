@@ -38,6 +38,7 @@ $("#nav").onclick=e=>{
   if(b.dataset.page==="dashboard") loadDashboard();
   else if(b.dataset.page==="pneus") loadPneus();
   else if(b.dataset.page==="ordens-servico") loadOrdensServico();
+  else if(b.dataset.page==="manutencoes") loadManutencao();
   else loadList(b.dataset.page,b.textContent.trim());
 };
 
@@ -402,6 +403,71 @@ async function imprimirOS(id){
 }
 
 async function salvarItemOS(id,body){try{await api(`/api/ordens-servico-itens/${id}`,{method:"PUT",body:JSON.stringify(body)});}catch(e){alert(e.message)}}
+
+
+async function loadManutencao(){
+  $("#pageTitle").textContent="Manutenção";
+  $("#content").innerHTML=`<section class="panel"><h3>🛠 Gestão de manutenção por veículo</h3><p>Carregando histórico...</p></section>`;
+  try{
+    const vs=await api("/api/manutencao/veiculos");
+    window.__manutVeiculos=vs;
+    $("#content").innerHTML=`
+      <section class="panel manut-top">
+        <div class="os-head"><div><h3>🚚 Veículos</h3><p>Clique no veículo para abrir o histórico individual.</p></div>
+        <button class="primary" id="novaManut">+ Registrar manutenção</button></div>
+        <div class="vehicle-chips"><button class="vehicle-chip active" data-v="">TODOS</button>${vs.map(v=>`<button class="vehicle-chip" data-v="${escapeHtml(v.prefixo)}">${escapeHtml(v.prefixo)}<small>${v.registros} registros</small></button>`).join("")}</div>
+      </section>
+      <section class="panel manut-filtros">
+        <div class="filter-grid"><label>Data inicial<input id="manInicio" type="date"></label><label>Data final<input id="manFim" type="date"></label>
+        <label>Empresa<input id="manEmpresa" placeholder="Filtrar empresa"></label><label>Serviço / sistema<input id="manServico" placeholder="Ex.: Motor, Elétrico"></label>
+        <button class="primary" id="aplicarMan">Aplicar filtros</button><button class="secondary" id="limparMan">Limpar</button></div>
+      </section>
+      <div id="manDashboard"></div>`;
+    window.__manutPrefixo="";
+    document.querySelectorAll(".vehicle-chip").forEach(b=>b.onclick=()=>{document.querySelectorAll(".vehicle-chip").forEach(x=>x.classList.remove("active"));b.classList.add("active");window.__manutPrefixo=b.dataset.v;carregarPainelManutencao()});
+    $("#aplicarMan").onclick=carregarPainelManutencao;
+    $("#limparMan").onclick=()=>{$("#manInicio").value="";$("#manFim").value="";$("#manEmpresa").value="";$("#manServico").value="";carregarPainelManutencao()};
+    $("#novaManut").onclick=modalNovaManutencao;
+    await carregarPainelManutencao();
+  }catch(e){$("#content").innerHTML=`<section class="panel"><h3>Manutenção</h3><p>${fmt(e.message)}</p></section>`}
+}
+async function carregarPainelManutencao(){
+  const q=new URLSearchParams();
+  if(window.__manutPrefixo)q.set("prefixo",window.__manutPrefixo);
+  if($("#manInicio")?.value)q.set("inicio",$("#manInicio").value);
+  if($("#manFim")?.value)q.set("fim",$("#manFim").value);
+  const d=await api(`/api/manutencao/dashboard?${q.toString()}`);
+  const emp=($("#manEmpresa")?.value||"").toLowerCase(), srv=($("#manServico")?.value||"").toLowerCase();
+  let hist=d.historico.filter(x=>(!emp||String(x.empresa||"").toLowerCase().includes(emp))&&(!srv||`${x.sistema||""} ${x.servico||""} ${x.produto||""}`.toLowerCase().includes(srv)));
+  const total=hist.reduce((s,x)=>s+Number(x.custo||0),0);
+  const countBy=(key)=>Object.entries(hist.reduce((o,x)=>{const k=x[key]||"Não informado";o[k]=(o[k]||0)+1;return o},{})).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const serv=countBy("sistema"), empRank=countBy("empresa"), maxS=Math.max(1,...serv.map(x=>x[1])),maxE=Math.max(1,...empRank.map(x=>x[1]));
+  $("#manDashboard").innerHTML=`
+    <div class="cards manut-kpis">${card("Gasto no período",`R$ ${total.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}`,"💰")}
+    ${card("Registros",hist.length,"🔧")}${card("Ticket médio",`R$ ${(hist.length?total/hist.length:0).toLocaleString("pt-BR",{minimumFractionDigits:2})}`,"📊")}
+    ${card("Veículo selecionado",window.__manutPrefixo||"Todos","🚚")}</div>
+    <div class="manut-dash-grid">
+      <section class="panel"><h3>🏆 Serviços mais realizados</h3>${serv.length?serv.map(([n,v],i)=>`<div class="rank-row"><b>${i+1}. ${escapeHtml(n)}</b><span>${v}</span><div class="rank-bar"><i style="width:${v/maxS*100}%"></i></div></div>`).join(""):"<p>Sem dados.</p>"}</section>
+      <section class="panel"><h3>🏢 Empresas mais utilizadas</h3>${empRank.length?empRank.map(([n,v],i)=>`<div class="rank-row"><b>${i+1}. ${escapeHtml(n)}</b><span>${v}</span><div class="rank-bar"><i style="width:${v/maxE*100}%"></i></div></div>`).join(""):"<p>Sem dados.</p>"}</section>
+    </div>
+    <section class="panel" style="margin-top:16px"><div class="os-head"><div><h3>📚 Histórico de manutenção ${window.__manutPrefixo?`— Veículo ${escapeHtml(window.__manutPrefixo)}`:""}</h3>
+    <p>${hist.length} lançamento(s) encontrados.</p></div><b>Total: R$ ${total.toLocaleString("pt-BR",{minimumFractionDigits:2})}</b></div>
+    <div class="table-wrap"><table><thead><tr><th>Data</th><th>Veículo</th><th>Serviço</th><th>Sistema</th><th>Produto / serviço executado</th><th>Empresa</th><th>NF</th><th>Local</th><th>Valor</th></tr></thead>
+    <tbody>${hist.map(x=>`<tr><td>${formatarDataBR(x.data_emissao||x.data_abertura)}</td><td><b>${fmt(x.prefixo)}</b></td><td>${fmt(x.servico||x.tipo)}</td><td>${fmt(x.sistema)}</td>
+    <td class="wrapcell">${escapeHtml(x.produto||x.descricao||"")}</td><td>${fmt(x.empresa)}</td><td>${fmt(x.nota_fiscal)}</td><td>${fmt(x.local)}</td><td><b>R$ ${Number(x.custo||0).toLocaleString("pt-BR",{minimumFractionDigits:2})}</b></td></tr>`).join("")}</tbody></table></div></section>`;
+}
+function modalNovaManutencao(){
+  const opts=(window.__manutVeiculos||[]).map(v=>`<option>${escapeHtml(v.prefixo)}</option>`).join("");
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-bg" id="modalMan"><form class="modal" id="formMan"><div class="tire-modal-head"><h2>🛠 Registrar manutenção</h2><button type="button" class="secondary" id="xMan">✕</button></div>
+  <div class="modal-grid"><label>Veículo<select name="prefixo" required><option value="">Selecione</option>${opts}</select></label><label>Data<input name="data_emissao" type="date" required></label>
+  <label>Serviço<input name="servico" placeholder="Manutenção / Serviço"></label><label>Sistema<input name="sistema" placeholder="Motor, Elétrico, Freio..."></label>
+  <label>Empresa<input name="empresa" placeholder="Fornecedor / oficina"></label><label>Nota fiscal<input name="nota_fiscal"></label>
+  <label>Local<select name="local"><option>EXTERNO</option><option>INTERNO</option></select></label><label>Valor (R$)<input name="custo" type="number" min="0" step="0.01"></label></div>
+  <label>Produto / serviço executado<textarea name="produto" rows="3"></textarea></label><label>Descrição<textarea name="descricao" rows="2" required></textarea></label>
+  <div class="actions"><button type="button" class="secondary" id="cancelMan">Cancelar</button><button class="primary">💾 Salvar manutenção</button></div></form></div>`);
+  $("#xMan").onclick=$("#cancelMan").onclick=()=>$("#modalMan").remove();
+  $("#formMan").onsubmit=async e=>{e.preventDefault();try{await api("/api/manutencoes",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});$("#modalMan").remove();await loadManutencao()}catch(x){alert(x.message)}};
+}
 
 
 async function loadList(resource,title){
