@@ -23,3 +23,9 @@
 @media(max-width:700px){.check-meta{grid-template-columns:1fr}.daily-table td:nth-child(4){min-width:180px}}
 
 .info-box,.vehicle-info{padding:12px;border:1px solid #cfe0f5;background:#eff6ff;border-radius:10px;margin:8px 0 14px}.modal-bg{z-index:9999}
+
+.profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.profile-grid label{display:grid;gap:5px;margin:12px 0}
+@media(max-width:800px){
+ .profile-grid{grid-template-columns:1fr}
+ body.motorista .sidebar{width:100%;min-height:auto}
+}

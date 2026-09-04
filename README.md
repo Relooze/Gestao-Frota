@@ -41,3 +41,20 @@ O motorista pode ter um veículo padrão associado ao usuário.
 - Chamado registra veículo, motorista, ocorrência, localização, prioridade e andamento.
 - Supervisor pode transformar chamado em O.S.
 - Corrigido fluxo do checklist para evitar o alerta genérico "Erro na operação" e retornar mensagens de validação.
+
+
+## V2.7 — Portal restrito do motorista
+Ao entrar:
+1. Se for primeiro acesso, troca obrigatória da senha padrão.
+2. Motorista seleciona o veículo que utilizará naquele dia.
+3. Sistema registra Motorista + Veículo + Data.
+4. Redirecionamento direto para Checklist Diário.
+
+Menu do motorista fica limitado a:
+- Meu Perfil / alterar senha
+- Checklist Diário
+- Abertura de Chamado
+- Andamento das O.S.
+
+O motorista não visualiza Dashboard geral, Frota, Pneus, Manutenção, Usuários, Tratamento, Combustível, Ocorrências ou Equipe.
+As O.S. exibidas ao motorista são vinculadas ao veículo selecionado para o dia.

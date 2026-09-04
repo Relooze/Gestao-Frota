@@ -46,6 +46,7 @@ $("#nav").onclick=e=>{
   else if(b.dataset.page==="abertura-chamado") loadAberturaChamado();
   else if(b.dataset.page==="minhas-os") loadMinhasOS();
   else if(b.dataset.page==="chamados-abertos") loadChamadosAbertos();
+  else if(b.dataset.page==="perfil-motorista") loadPerfilMotorista();
   else loadList(b.dataset.page,b.textContent.trim());
 };
 
@@ -663,6 +664,51 @@ async function loadChamadosAbertos(){
  }catch(e){$("#content").innerHTML=`<section class="panel"><h3>Acesso do supervisor</h3><p>${escapeHtml(e.message)}</p></section>`}
 }
 
+async function aplicarMenuPorPerfil(){
+  try{
+    const s=await api("/api/sessao");
+    window.__sessao=s;
+    const motorista=String(s.perfil||"").toLowerCase()==="motorista";
+    const permitidasMotorista=["checklist-diario","abertura-chamado","minhas-os","perfil-motorista"];
+    document.querySelectorAll("[data-page]").forEach(b=>{
+      if(motorista) b.style.display=permitidasMotorista.includes(b.dataset.page)?"":"none";
+      else b.style.display="";
+    });
+    if(motorista){
+      const dia=await api("/api/motorista/veiculo-dia");
+      if(!dia) return abrirSelecaoVeiculoDia();
+      window.__veiculoDia=dia;
+    }
+  }catch(e){}
+}
+
+async function abrirSelecaoVeiculoDia(){
+  if($("#modalVeiculoDia"))return;
+  const vs=await api("/api/veiculos");
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-bg" id="modalVeiculoDia"><form class="modal" id="formVeiculoDia">
+    <h2>🚚 Qual veículo você utilizará hoje?</h2>
+    <p>Antes de iniciar a operação, selecione o veículo. Em seguida você será direcionado para o Checklist Diário.</p>
+    <label>Veículo de hoje<select name="veiculo_id" required><option value="">Selecione o veículo</option>${vs.map(v=>`<option value="${v.id}">${escapeHtml(v.prefixo)} • ${escapeHtml(v.placa||"-")} • ${escapeHtml(v.modelo||"")}</option>`).join("")}</select></label>
+    <div class="actions"><button class="primary">Continuar para o Checklist</button></div></form></div>`);
+  $("#formVeiculoDia").onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.target);try{
+    await api("/api/motorista/veiculo-dia",{method:"POST",body:JSON.stringify({veiculo_id:Number(fd.get("veiculo_id"))})});
+    $("#modalVeiculoDia").remove();
+    const b=document.querySelector('[data-page="checklist-diario"]'); if(b){b.click()} else loadChecklistDiario();
+  }catch(x){alert(x.message)}};
+}
+
+async function loadPerfilMotorista(){
+ $("#pageTitle").textContent="Meu Perfil";
+ try{
+  const u=await api("/api/motorista/perfil");
+  $("#content").innerHTML=`<div class="profile-grid">
+   <section class="panel"><h2>👤 Meu perfil</h2><form id="formMeuPerfil"><label>Nome<input name="nome" value="${escapeHtml(u.nome||"")}" required></label><label>E-mail<input name="email" type="email" value="${escapeHtml(u.email||"")}" required></label><div class="actions"><button class="primary">Salvar perfil</button></div></form></section>
+   <section class="panel"><h2>🔐 Alterar senha</h2><form id="formSenhaMotorista"><label>Senha atual<input name="senha_atual" type="password" required></label><label>Nova senha<input name="nova_senha" type="password" minlength="6" required></label><label>Confirmar nova senha<input name="confirmar" type="password" minlength="6" required></label><div class="actions"><button class="primary">Alterar senha</button></div></form></section></div>`;
+  $("#formMeuPerfil").onsubmit=async e=>{e.preventDefault();try{await api("/api/motorista/perfil",{method:"PUT",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});alert("Perfil atualizado.")}catch(x){alert(x.message)}};
+  $("#formSenhaMotorista").onsubmit=async e=>{e.preventDefault();const o=Object.fromEntries(new FormData(e.target));if(o.nova_senha!==o.confirmar)return alert("As novas senhas não conferem.");try{await api("/api/motorista/alterar-senha",{method:"PUT",body:JSON.stringify(o)});e.target.reset();alert("Senha alterada com sucesso.")}catch(x){alert(x.message)}};
+ }catch(e){$("#content").innerHTML=`<section class="panel"><p>${escapeHtml(e.message)}</p></section>`}
+}
+
 async function loadList(resource,title){
   $("#pageTitle").textContent=labels[resource]||title;
   const rows=await api(`/api/${resource}`);
@@ -696,4 +742,4 @@ window.deleteVehicle=async(id,prefixo)=>{if(!confirm(`Excluir o veículo ${prefi
 
 boot().catch(e=>{$("#auth").classList.remove("hidden");$("#authMsg").textContent="Falha ao iniciar: "+e.message});
 
-setTimeout(()=>{ if(localStorage.getItem("token")) checarPrimeiroAcesso(); },300);
+setTimeout(async()=>{ if(localStorage.getItem("token")){ await checarPrimeiroAcesso(); await aplicarMenuPorPerfil(); } },300);
