@@ -43,6 +43,9 @@ $("#nav").onclick=e=>{
   else if(b.dataset.page==="checklist-diario") loadChecklistDiario();
   else if(b.dataset.page==="checklist-tratamento") loadTratamentoChecklist();
   else if(b.dataset.page==="usuarios") loadUsuarios();
+  else if(b.dataset.page==="abertura-chamado") loadAberturaChamado();
+  else if(b.dataset.page==="minhas-os") loadMinhasOS();
+  else if(b.dataset.page==="chamados-abertos") loadChamadosAbertos();
   else loadList(b.dataset.page,b.textContent.trim());
 };
 
@@ -591,7 +594,7 @@ async function loadUsuarios(){
 }
 function modalUsuario(vs){
  document.body.insertAdjacentHTML("beforeend",`<div class="modal-bg" id="modalUser"><form class="modal" id="formUser"><div class="tire-modal-head"><h2>👤 Novo usuário</h2><button type="button" class="secondary" id="xUser">✕</button></div>
- <div class="modal-grid"><label>Nome<input name="nome" required></label><label>E-mail<input name="email" type="email" required></label><label>Senha inicial<input name="senha" type="password" minlength="6" required></label>
+ <div class="modal-grid"><label>Nome<input name="nome" required></label><label>E-mail<input name="email" type="email" required></label><div class="info-box"><b>Senha inicial:</b> 1234<br><small>O usuário será obrigado a criar uma nova senha no primeiro acesso.</small></div>
  <label>Perfil<select name="perfil" required><option value="motorista">Motorista</option><option value="supervisor">Supervisor</option><option value="admin">Administrador</option></select></label>
  <label>Veículo padrão<select name="veiculo_id"><option value="">Sem veículo fixo</option>${vs.map(v=>`<option value="${v.id}">${escapeHtml(v.prefixo)} • ${escapeHtml(v.placa||"-")}</option>`).join("")}</select></label></div>
  <div class="actions"><button type="button" class="secondary" id="cancelUser">Cancelar</button><button class="primary">Criar usuário</button></div></form></div>`);
@@ -599,6 +602,66 @@ function modalUsuario(vs){
  $("#formUser").onsubmit=async e=>{e.preventDefault();const o=Object.fromEntries(new FormData(e.target));if(!o.veiculo_id)o.veiculo_id=null;try{await api("/api/usuarios",{method:"POST",body:JSON.stringify(o)});$("#modalUser").remove();loadUsuarios()}catch(x){alert(x.message)}};
 }
 
+
+async function checarPrimeiroAcesso(){
+  try{
+    const s=await api("/api/sessao");
+    window.__sessao=s;
+    if(s.primeiro_acesso) abrirTrocaSenhaObrigatoria();
+    return s;
+  }catch(e){return null}
+}
+function abrirTrocaSenhaObrigatoria(){
+  if($("#modalPrimeiroAcesso"))return;
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-bg" id="modalPrimeiroAcesso"><form class="modal" id="formPrimeiroAcesso">
+    <h2>🔐 Primeiro acesso</h2><p>Por segurança, altere a senha padrão <b>1234</b> antes de utilizar o sistema.</p>
+    <label>Nova senha<input name="senha" type="password" minlength="6" required autocomplete="new-password"></label>
+    <label>Confirmar nova senha<input name="confirmar" type="password" minlength="6" required autocomplete="new-password"></label>
+    <div class="actions"><button class="primary">Salvar nova senha</button></div></form></div>`);
+  $("#formPrimeiroAcesso").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);if(f.get("senha")!==f.get("confirmar"))return alert("As senhas não conferem.");
+    try{await api("/api/primeiro-acesso/alterar-senha",{method:"POST",body:JSON.stringify({senha:f.get("senha")})});$("#modalPrimeiroAcesso").remove();alert("Senha alterada com sucesso.");location.reload()}catch(x){alert(x.message)}};
+}
+
+async function loadAberturaChamado(){
+ $("#pageTitle").textContent="Abertura de Chamado";
+ try{
+  const [s,meus]=await Promise.all([api("/api/sessao"),api("/api/chamados/meus")]);
+  $("#content").innerHTML=`<section class="panel"><h2>🆘 Solicitar manutenção</h2><p>Use esta tela quando surgir um problema durante a rota ou operação.</p>
+   <div class="vehicle-info"><b>Veículo:</b> ${escapeHtml(s.veiculo_prefixo||"-")} • <b>Placa:</b> ${escapeHtml(s.placa||"-")} • <b>Modelo:</b> ${escapeHtml(s.modelo||"-")}</div>
+   <form id="formChamado"><div class="modal-grid"><label>Problema / componente<input name="titulo" placeholder="Ex.: Balão de ar" required></label>
+   <label>Prioridade<select name="prioridade"><option>Normal</option><option>Alta</option><option>Crítica</option></select></label>
+   <label>Localização atual<input name="localizacao" placeholder="Ex.: Parnamirim / Em rota"></label></div>
+   <label>Descreva a ocorrência<textarea name="descricao" rows="5" placeholder="Explique o que aconteceu, sintomas e condição do veículo." required></textarea></label>
+   <div class="actions"><button class="primary">📨 Enviar chamado ao supervisor</button></div></form></section>
+   <section class="panel" style="margin-top:16px"><h3>Meus chamados</h3><div class="table-wrap"><table><thead><tr><th>Chamado</th><th>Data</th><th>Problema</th><th>Prioridade</th><th>Status</th><th>Retorno</th></tr></thead>
+   <tbody>${meus.map(x=>`<tr><td><b>${escapeHtml(x.numero||"-")}</b></td><td>${new Date(x.criado_em).toLocaleString("pt-BR")}</td><td>${escapeHtml(x.titulo)}</td><td>${escapeHtml(x.prioridade)}</td><td><b>${escapeHtml(x.status)}</b></td><td>${escapeHtml(x.resposta_supervisor||"-")}</td></tr>`).join("")||'<tr><td colspan="6">Nenhum chamado aberto.</td></tr>'}</tbody></table></div></section>`;
+  $("#formChamado").onsubmit=async e=>{e.preventDefault();if(!confirm("Enviar esta ocorrência ao supervisor?"))return;const o=Object.fromEntries(new FormData(e.target));try{const r=await api("/api/chamados",{method:"POST",body:JSON.stringify(o)});alert(`${r.numero} aberto com sucesso.`);loadAberturaChamado()}catch(x){alert(x.message)}};
+ }catch(e){$("#content").innerHTML=`<section class="panel"><h3>Não foi possível abrir a tela</h3><p>${escapeHtml(e.message)}</p></section>`}
+}
+
+async function loadMinhasOS(){
+ $("#pageTitle").textContent="Andamento das Ordens de Serviço";
+ try{
+  const [s,rows]=await Promise.all([api("/api/sessao"),api("/api/motorista/minhas-os")]);
+  $("#content").innerHTML=`<section class="panel"><h2>🔧 O.S. do veículo ${escapeHtml(s.veiculo_prefixo||"-")}</h2><p>Acompanhe o andamento das manutenções do seu veículo.</p>
+  <div class="table-wrap"><table><thead><tr><th>O.S.</th><th>Abertura</th><th>Status</th><th>Serviços / demandas</th><th>Observação</th></tr></thead><tbody>
+  ${rows.map(x=>`<tr><td><b>${escapeHtml(x.numero||String(x.id))}</b></td><td>${x.criado_em?new Date(x.criado_em).toLocaleString("pt-BR"):"-"}</td><td><b>${escapeHtml(x.status)}</b></td>
+  <td>${(x.itens||[]).map(i=>escapeHtml(i.descricao)).join("<br>")||"-"}</td><td>${escapeHtml(x.observacao||"-")}</td></tr>`).join("")||'<tr><td colspan="5">Nenhuma O.S. para este veículo.</td></tr>'}</tbody></table></div></section>`;
+ }catch(e){$("#content").innerHTML=`<section class="panel"><p>${escapeHtml(e.message)}</p></section>`}
+}
+
+async function loadChamadosAbertos(){
+ $("#pageTitle").textContent="Chamados em Aberto";
+ try{
+  const rows=await api("/api/chamados/abertos");
+  $("#content").innerHTML=`<div class="cards manut-kpis">${card("Chamados",rows.length,"📨")}${card("Abertos",rows.filter(x=>x.status==="Aberto").length,"⚠️")}${card("Críticos",rows.filter(x=>x.prioridade==="Crítica"&&x.status==="Aberto").length,"🚨")}${card("O.S. geradas",rows.filter(x=>x.ordem_servico_id).length,"📋")}</div>
+  <section class="panel" style="margin-top:16px"><h3>📨 Ocorrências enviadas pelos motoristas</h3><div class="table-wrap"><table><thead><tr><th>Chamado</th><th>Data</th><th>Veículo</th><th>Motorista</th><th>Problema</th><th>Local</th><th>Prioridade</th><th>Status</th><th>Ação</th></tr></thead>
+  <tbody>${rows.map(x=>`<tr class="${x.prioridade==="Crítica"?"check-problem":""}"><td><b>${escapeHtml(x.numero||"-")}</b></td><td>${new Date(x.criado_em).toLocaleString("pt-BR")}</td><td><b>${escapeHtml(x.prefixo)}</b><br>${escapeHtml(x.placa||"")}</td><td>${escapeHtml(x.motorista||"-")}</td><td><b>${escapeHtml(x.titulo)}</b><br>${escapeHtml(x.descricao)}</td><td>${escapeHtml(x.localizacao||"-")}</td><td>${escapeHtml(x.prioridade)}</td><td>${escapeHtml(x.status)}</td>
+  <td>${!x.ordem_servico_id?`<button class="primary" data-chos="${x.id}">📋 Gerar O.S.</button>`:`<button class="secondary" data-open-os="${x.ordem_servico_id}">Abrir O.S.</button>`}</td></tr>`).join("")}</tbody></table></div></section>`;
+  document.querySelectorAll("[data-chos]").forEach(b=>b.onclick=async()=>{if(!confirm("Gerar O.S. a partir deste chamado?"))return;try{const r=await api(`/api/chamados/${b.dataset.chos}/gerar-os`,{method:"POST",body:"{}"});alert(`${r.numero} gerada.`);loadChamadosAbertos()}catch(e){alert(e.message)}});
+  document.querySelectorAll("[data-open-os]").forEach(b=>b.onclick=()=>abrirOS(b.dataset.openOs));
+ }catch(e){$("#content").innerHTML=`<section class="panel"><h3>Acesso do supervisor</h3><p>${escapeHtml(e.message)}</p></section>`}
+}
 
 async function loadList(resource,title){
   $("#pageTitle").textContent=labels[resource]||title;
@@ -632,3 +695,5 @@ $("#vehicleForm").onsubmit=async e=>{e.preventDefault();const o=Object.fromEntri
 window.deleteVehicle=async(id,prefixo)=>{if(!confirm(`Excluir o veículo ${prefixo}?`))return;try{await api(`/api/veiculos/${id}`,{method:"DELETE"});loadList("veiculos","Frota")}catch(x){alert(x.message)}};
 
 boot().catch(e=>{$("#auth").classList.remove("hidden");$("#authMsg").textContent="Falha ao iniciar: "+e.message});
+
+setTimeout(()=>{ if(localStorage.getItem("token")) checarPrimeiroAcesso(); },300);

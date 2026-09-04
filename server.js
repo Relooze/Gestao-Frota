@@ -190,6 +190,29 @@ async function initDatabase() {
   `;
   await pool.query(sql);
 
+
+  await pool.query(`
+    ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS primeiro_acesso BOOLEAN DEFAULT FALSE;
+    ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS senha_alterada_em TIMESTAMPTZ;
+
+    CREATE TABLE IF NOT EXISTS chamados (
+      id SERIAL PRIMARY KEY,
+      numero VARCHAR(30) UNIQUE,
+      usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+      veiculo_id INTEGER REFERENCES veiculos(id) ON DELETE SET NULL,
+      titulo VARCHAR(180) NOT NULL,
+      descricao TEXT NOT NULL,
+      localizacao VARCHAR(255),
+      prioridade VARCHAR(30) DEFAULT 'Normal',
+      status VARCHAR(40) DEFAULT 'Aberto',
+      supervisor_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+      resposta_supervisor TEXT,
+      ordem_servico_id INTEGER,
+      criado_em TIMESTAMPTZ DEFAULT NOW(),
+      atualizado_em TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
   await pool.query(`
     ALTER TABLE checklists ADD COLUMN IF NOT EXISTS usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL;
     ALTER TABLE checklists ADD COLUMN IF NOT EXISTS data_checklist DATE DEFAULT CURRENT_DATE;
@@ -2530,6 +2553,26 @@ app.get("/api/manutencao/ativos/:categoria", auth, async (req,res) => {
   }catch(e){console.error(e);res.status(500).json({erro:"Erro ao listar ativos."})}
 });
 
+
+async function exigirSenhaAtualizada(req,res,next){
+  try{
+    const r=await pool.query("SELECT primeiro_acesso FROM usuarios WHERE id=$1",[req.user.id]);
+    if(r.rows[0]?.primeiro_acesso) return res.status(428).json({erro:"ALTERAR_SENHA_PRIMEIRO_ACESSO"});
+    next();
+  }catch(e){res.status(500).json({erro:"Erro ao validar usuário."})}
+}
+
+app.post("/api/primeiro-acesso/alterar-senha",auth,async(req,res)=>{
+  try{
+    const senha=String(req.body.senha||"");
+    if(senha.length<6)return res.status(400).json({erro:"A nova senha deve ter no mínimo 6 caracteres."});
+    if(senha==="1234")return res.status(400).json({erro:"Escolha uma senha diferente da senha padrão."});
+    const hash=await bcrypt.hash(senha,12);
+    await pool.query("UPDATE usuarios SET senha_hash=$1,primeiro_acesso=FALSE,senha_alterada_em=NOW() WHERE id=$2",[hash,req.user.id]);
+    res.json({sucesso:true});
+  }catch(e){res.status(500).json({erro:"Erro ao alterar senha."})}
+});
+
 // ======================================================
 // V2.5 - USUÁRIOS + CHECKLIST DIÁRIO + TRATAMENTO
 // ======================================================
@@ -2555,12 +2598,13 @@ app.get("/api/usuarios",auth,somenteAdminSupervisor,async(req,res)=>{
 
 app.post("/api/usuarios",auth,somenteAdminSupervisor,async(req,res)=>{
   try{
-    const {nome,email,senha,perfil,veiculo_id}=req.body;
-    if(!nome||!email||!senha||senha.length<6)return res.status(400).json({erro:"Nome, e-mail e senha (mínimo 6 caracteres) são obrigatórios."});
+    const {nome,email,perfil,veiculo_id}=req.body;
+    const senha="1234";
+    if(!nome||!email)return res.status(400).json({erro:"Nome e e-mail são obrigatórios."});
     if(!["admin","supervisor","motorista"].includes(perfil))return res.status(400).json({erro:"Perfil inválido."});
     const hash=await bcrypt.hash(senha,12);
-    const r=await pool.query(`INSERT INTO usuarios(nome,email,senha_hash,perfil,veiculo_id)
-      VALUES($1,$2,$3,$4,$5) RETURNING id,nome,email,perfil,ativo,veiculo_id`,
+    const r=await pool.query(`INSERT INTO usuarios(nome,email,senha_hash,perfil,veiculo_id,primeiro_acesso)
+      VALUES($1,$2,$3,$4,$5,TRUE) RETURNING id,nome,email,perfil,ativo,veiculo_id,primeiro_acesso`,
       [nome.trim(),email.trim().toLowerCase(),hash,perfil,veiculo_id||null]);
     res.status(201).json(r.rows[0]);
   }catch(e){res.status(400).json({erro:e.code==="23505"?"E-mail já cadastrado.":e.message})}
@@ -2642,6 +2686,79 @@ app.put("/api/checklist-tratamento/:id/status",auth,somenteAdminSupervisor,async
   if(!["Pendente","Em análise","Sem pendência","Tratado"].includes(st))return res.status(400).json({erro:"Status inválido."});
   await pool.query(`UPDATE checklists SET status_tratamento=$1,tratado_por=$2,tratado_em=CASE WHEN $1 IN ('Sem pendência','Tratado') THEN NOW() ELSE tratado_em END WHERE id=$3`,
     [st,req.user.id,req.params.id]);
+  res.json({sucesso:true});
+});
+
+
+app.get("/api/sessao",auth,async(req,res)=>{
+  const r=await pool.query(`SELECT u.id,u.nome,u.email,u.perfil,u.ativo,u.primeiro_acesso,u.veiculo_id,
+    v.prefixo veiculo_prefixo,v.placa,v.modelo
+    FROM usuarios u LEFT JOIN veiculos v ON v.id=u.veiculo_id WHERE u.id=$1`,[req.user.id]);
+  res.json(r.rows[0]);
+});
+
+app.get("/api/motorista/minhas-os",auth,exigirSenhaAtualizada,async(req,res)=>{
+  const u=await pool.query("SELECT veiculo_id FROM usuarios WHERE id=$1",[req.user.id]);
+  const vid=u.rows[0]?.veiculo_id;
+  if(!vid)return res.json([]);
+  const r=await pool.query(`SELECT os.*,v.prefixo,v.placa,
+    COALESCE((SELECT json_agg(i ORDER BY i.id) FROM ordem_servico_itens i WHERE i.ordem_id=os.id),'[]') itens
+    FROM ordens_servico os JOIN veiculos v ON v.id=os.veiculo_id
+    WHERE os.veiculo_id=$1 ORDER BY os.criado_em DESC`,[vid]);
+  res.json(r.rows);
+});
+
+app.post("/api/chamados",auth,exigirSenhaAtualizada,async(req,res)=>{
+  try{
+    const u=await pool.query("SELECT veiculo_id,perfil FROM usuarios WHERE id=$1",[req.user.id]);
+    let vid=req.body.veiculo_id||u.rows[0]?.veiculo_id;
+    if(!vid)return res.status(400).json({erro:"Usuário sem veículo associado."});
+    const titulo=String(req.body.titulo||"").trim(),descricao=String(req.body.descricao||"").trim();
+    if(!titulo||!descricao)return res.status(400).json({erro:"Informe o problema e a descrição da ocorrência."});
+    const r=await pool.query(`INSERT INTO chamados(usuario_id,veiculo_id,titulo,descricao,localizacao,prioridade)
+      VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,[req.user.id,vid,titulo,descricao,req.body.localizacao||"",req.body.prioridade||"Normal"]);
+    const numero=`CH-${String(r.rows[0].id).padStart(6,"0")}`;
+    await pool.query("UPDATE chamados SET numero=$1 WHERE id=$2",[numero,r.rows[0].id]);
+    res.status(201).json({sucesso:true,id:r.rows[0].id,numero});
+  }catch(e){console.error(e);res.status(500).json({erro:"Erro ao abrir chamado."})}
+});
+
+app.get("/api/chamados/meus",auth,exigirSenhaAtualizada,async(req,res)=>{
+  const r=await pool.query(`SELECT c.*,v.prefixo,v.placa FROM chamados c JOIN veiculos v ON v.id=c.veiculo_id
+    WHERE c.usuario_id=$1 ORDER BY c.criado_em DESC`,[req.user.id]);
+  res.json(r.rows);
+});
+
+app.get("/api/chamados/abertos",auth,exigirSenhaAtualizada,somenteAdminSupervisor,async(req,res)=>{
+  const r=await pool.query(`SELECT c.*,v.prefixo,v.placa,v.modelo,u.nome motorista,s.nome supervisor
+    FROM chamados c JOIN veiculos v ON v.id=c.veiculo_id LEFT JOIN usuarios u ON u.id=c.usuario_id
+    LEFT JOIN usuarios s ON s.id=c.supervisor_id ORDER BY CASE WHEN c.status='Aberto' THEN 0 ELSE 1 END,c.criado_em DESC`);
+  res.json(r.rows);
+});
+
+app.post("/api/chamados/:id/gerar-os",auth,exigirSenhaAtualizada,somenteAdminSupervisor,async(req,res)=>{
+  const c=await pool.connect();
+  try{
+    await c.query("BEGIN");
+    const ch=await c.query("SELECT * FROM chamados WHERE id=$1 FOR UPDATE",[req.params.id]);
+    if(!ch.rowCount){await c.query("ROLLBACK");return res.status(404).json({erro:"Chamado não encontrado."})}
+    if(ch.rows[0].ordem_servico_id){await c.query("ROLLBACK");return res.status(400).json({erro:"Chamado já possui O.S."})}
+    const os=await c.query(`INSERT INTO ordens_servico(numero,veiculo_id,status,observacao) VALUES(NULL,$1,'Conferência',$2) RETURNING id`,
+      [ch.rows[0].veiculo_id,`Gerada pelo chamado ${ch.rows[0].numero}: ${ch.rows[0].descricao}`]);
+    const oid=os.rows[0].id,numero=`OS-${String(oid).padStart(6,"0")}`;
+    await c.query("UPDATE ordens_servico SET numero=$1 WHERE id=$2",[numero,oid]);
+    await c.query(`INSERT INTO ordem_servico_itens(ordem_id,origem,origem_id,descricao,prioridade)
+      VALUES($1,'Chamado',$2,$3,$4)`,[oid,Number(req.params.id),`${ch.rows[0].titulo} • ${ch.rows[0].descricao}`,ch.rows[0].prioridade==="Crítica"?"Crítica":"Alta"]);
+    await c.query(`UPDATE chamados SET status='O.S. gerada',supervisor_id=$1,ordem_servico_id=$2,atualizado_em=NOW() WHERE id=$3`,
+      [req.user.id,oid,req.params.id]);
+    await c.query("COMMIT");res.json({sucesso:true,id:oid,numero});
+  }catch(e){await c.query("ROLLBACK");console.error(e);res.status(500).json({erro:"Erro ao gerar O.S."})}finally{c.release()}
+});
+
+app.put("/api/chamados/:id",auth,exigirSenhaAtualizada,somenteAdminSupervisor,async(req,res)=>{
+  const {status,resposta_supervisor}=req.body;
+  await pool.query(`UPDATE chamados SET status=COALESCE($1,status),resposta_supervisor=COALESCE($2,resposta_supervisor),
+    supervisor_id=$3,atualizado_em=NOW() WHERE id=$4`,[status||null,resposta_supervisor||null,req.user.id,req.params.id]);
   res.json({sucesso:true});
 });
 

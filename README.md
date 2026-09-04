@@ -30,3 +30,14 @@ Perfis:
 
 Itens RUIM e CRITICO são destacados e podem virar uma O.S. com um clique.
 O motorista pode ter um veículo padrão associado ao usuário.
+
+
+## V2.6 — Usuários, primeiro acesso e chamados
+- Cadastro de usuários com senha padrão 1234.
+- Primeiro acesso obriga troca para senha pessoal com mínimo de 6 caracteres.
+- Motorista associado a veículo.
+- Motorista: Checklist Diário, Abertura de Chamado e acompanhamento das O.S. do próprio veículo.
+- Supervisor/Admin: Cadastro de Usuários, Tratamento Checklist, Chamados em Aberto e geração de O.S.
+- Chamado registra veículo, motorista, ocorrência, localização, prioridade e andamento.
+- Supervisor pode transformar chamado em O.S.
+- Corrigido fluxo do checklist para evitar o alerta genérico "Erro na operação" e retornar mensagens de validação.

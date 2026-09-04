@@ -21,3 +21,5 @@
 
 .check-meta{display:grid;grid-template-columns:1fr 2fr;gap:12px;margin:16px 0}.check-meta label,.daily-table label{display:grid;gap:5px}.daily-table select,.daily-table input{width:100%}.daily-table td:nth-child(1){text-align:center;width:45px}.daily-table td:nth-child(3){width:180px}.daily-table td:nth-child(4){min-width:260px}.check-warning{margin-top:14px;padding:12px;border-radius:10px;background:#fff7ed;border:1px solid #fed7aa;font-weight:700}.check-sent{padding:12px;margin:12px 0;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px}.check-problem{background:#fff7ed}.check-problem:hover{background:#ffedd5}
 @media(max-width:700px){.check-meta{grid-template-columns:1fr}.daily-table td:nth-child(4){min-width:180px}}
+
+.info-box,.vehicle-info{padding:12px;border:1px solid #cfe0f5;background:#eff6ff;border-radius:10px;margin:8px 0 14px}.modal-bg{z-index:9999}
