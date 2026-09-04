@@ -841,3 +841,8 @@ window.deleteVehicle=async(id,prefixo)=>{if(!confirm(`Excluir o veículo ${prefi
 boot().catch(e=>{$("#auth").classList.remove("hidden");$("#authMsg").textContent="Falha ao iniciar: "+e.message});
 
 
+
+document.addEventListener("click",(e)=>{
+ if(e.target?.id==="mobileMenuBtn"){document.body.classList.toggle("sidebar-open");return;}
+ if(window.innerWidth<=900 && e.target?.closest?.("#nav [data-page]"))document.body.classList.remove("sidebar-open");
+});

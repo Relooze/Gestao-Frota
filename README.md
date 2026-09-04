@@ -76,3 +76,7 @@ As O.S. exibidas ao motorista são vinculadas ao veículo selecionado para o dia
 - Envio fica bloqueado até todos os itens serem avaliados.
 - Removidos: Palhetas do para-brisa, Cinto de segurança e Lameira de plástico.
 - Checklist passou de 18 para 15 itens obrigatórios.
+
+
+## V3.0 — Template Profissional COMJOL
+Identidade visual COMJOL integrada, sidebar corporativa azul, detalhes laranja, cards/tabelas/formulários modernizados e menu recolhível no celular. Todas as funções da V2.9 e o PostgreSQL são preservados.
