@@ -1,15 +1,12 @@
-# Gestão de Frota & Expedição — V2.3
+# Gestão de Frota V2.3.1 — Correção Manutenção Individual
 
-Nova gestão de Manutenção:
-- botões/lista de veículos;
-- histórico individual por veículo;
-- filtros por período, empresa e serviço/sistema;
-- total gasto e ticket médio;
-- ranking de serviços mais realizados;
-- ranking de empresas mais utilizadas;
-- cadastro de novas manutenções;
-- importação automática e única de 112 registros por veículo da planilha fornecida;
-- mantém O.S., pneus, alertas e impressão das versões anteriores.
+Correção do módulo Manutenção:
+- clique no botão do veículo passa a selecionar explicitamente o prefixo;
+- histórico é filtrado pelo veículo também no navegador, inclusive para registros antigos importados;
+- painel mostra claramente o veículo selecionado;
+- gasto, quantidade e ticket médio passam a refletir o veículo selecionado;
+- rankings de serviços e empresas também ficam individuais;
+- histórico detalhado mostra uma linha por serviço com data, veículo, serviço, sistema, descrição/item, loja/empresa, NF, local e valor;
+- filtros de período, empresa e serviço continuam funcionando.
 
-A importação histórica usa apenas linhas da planilha com número de veículo. Linhas gerais identificadas como "FROTA" não são vinculadas a um veículo e não foram importadas neste módulo.
-Não apague o PostgreSQL.
+Substitua os arquivos do pacote no GitHub. Não apague o PostgreSQL.

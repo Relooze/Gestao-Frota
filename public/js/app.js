@@ -415,7 +415,7 @@ async function loadManutencao(){
       <section class="panel manut-top">
         <div class="os-head"><div><h3>🚚 Veículos</h3><p>Clique no veículo para abrir o histórico individual.</p></div>
         <button class="primary" id="novaManut">+ Registrar manutenção</button></div>
-        <div class="vehicle-chips"><button class="vehicle-chip active" data-v="">TODOS</button>${vs.map(v=>`<button class="vehicle-chip" data-v="${escapeHtml(v.prefixo)}">${escapeHtml(v.prefixo)}<small>${v.registros} registros</small></button>`).join("")}</div>
+        <div class="vehicle-chips"><button type="button" class="vehicle-chip active" data-prefixo="">TODOS</button>${vs.map(v=>`<button type="button" class="vehicle-chip" data-prefixo="${escapeHtml(String(v.prefixo))}">${escapeHtml(String(v.prefixo))}<small>${v.registros} registros</small></button>`).join("")}</div>
       </section>
       <section class="panel manut-filtros">
         <div class="filter-grid"><label>Data inicial<input id="manInicio" type="date"></label><label>Data final<input id="manFim" type="date"></label>
@@ -424,7 +424,7 @@ async function loadManutencao(){
       </section>
       <div id="manDashboard"></div>`;
     window.__manutPrefixo="";
-    document.querySelectorAll(".vehicle-chip").forEach(b=>b.onclick=()=>{document.querySelectorAll(".vehicle-chip").forEach(x=>x.classList.remove("active"));b.classList.add("active");window.__manutPrefixo=b.dataset.v;carregarPainelManutencao()});
+    document.querySelectorAll(".vehicle-chip").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll(".vehicle-chip").forEach(x=>x.classList.remove("active"));b.classList.add("active");window.__manutPrefixo=String(b.getAttribute("data-prefixo")||"").trim();await carregarPainelManutencao();}));
     $("#aplicarMan").onclick=carregarPainelManutencao;
     $("#limparMan").onclick=()=>{$("#manInicio").value="";$("#manFim").value="";$("#manEmpresa").value="";$("#manServico").value="";carregarPainelManutencao()};
     $("#novaManut").onclick=modalNovaManutencao;
@@ -433,28 +433,75 @@ async function loadManutencao(){
 }
 async function carregarPainelManutencao(){
   const q=new URLSearchParams();
-  if(window.__manutPrefixo)q.set("prefixo",window.__manutPrefixo);
   if($("#manInicio")?.value)q.set("inicio",$("#manInicio").value);
   if($("#manFim")?.value)q.set("fim",$("#manFim").value);
+
+  // Busca o histórico do período e aplica o veículo também no navegador.
+  // Assim o botão funciona mesmo se houver registros antigos sem veiculo_id.
   const d=await api(`/api/manutencao/dashboard?${q.toString()}`);
-  const emp=($("#manEmpresa")?.value||"").toLowerCase(), srv=($("#manServico")?.value||"").toLowerCase();
-  let hist=d.historico.filter(x=>(!emp||String(x.empresa||"").toLowerCase().includes(emp))&&(!srv||`${x.sistema||""} ${x.servico||""} ${x.produto||""}`.toLowerCase().includes(srv)));
+  const prefixo=String(window.__manutPrefixo||"").trim();
+  const emp=($("#manEmpresa")?.value||"").trim().toLowerCase();
+  const srv=($("#manServico")?.value||"").trim().toLowerCase();
+
+  let hist=(d.historico||[]).filter(x=>{
+    const xp=String(x.prefixo||x.veiculo_prefixo||"").trim();
+    const okVeiculo=!prefixo || xp===prefixo;
+    const okEmpresa=!emp || String(x.empresa||"").toLowerCase().includes(emp);
+    const texto=`${x.servico||x.tipo||""} ${x.sistema||""} ${x.produto||""} ${x.descricao||""}`.toLowerCase();
+    const okServico=!srv || texto.includes(srv);
+    return okVeiculo && okEmpresa && okServico;
+  });
+
   const total=hist.reduce((s,x)=>s+Number(x.custo||0),0);
-  const countBy=(key)=>Object.entries(hist.reduce((o,x)=>{const k=x[key]||"Não informado";o[k]=(o[k]||0)+1;return o},{})).sort((a,b)=>b[1]-a[1]).slice(0,8);
-  const serv=countBy("sistema"), empRank=countBy("empresa"), maxS=Math.max(1,...serv.map(x=>x[1])),maxE=Math.max(1,...empRank.map(x=>x[1]));
+  const countBy=(key)=>Object.entries(hist.reduce((o,x)=>{
+    const k=String(x[key]||"Não informado").trim()||"Não informado";
+    o[k]=(o[k]||0)+1; return o;
+  },{})).sort((a,b)=>b[1]-a[1]).slice(0,8);
+
+  const serv=countBy("sistema"), empRank=countBy("empresa");
+  const maxS=Math.max(1,...serv.map(x=>x[1])),maxE=Math.max(1,...empRank.map(x=>x[1]));
+  const veiculoInfo=(window.__manutVeiculos||[]).find(v=>String(v.prefixo)===prefixo);
+
   $("#manDashboard").innerHTML=`
-    <div class="cards manut-kpis">${card("Gasto no período",`R$ ${total.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}`,"💰")}
-    ${card("Registros",hist.length,"🔧")}${card("Ticket médio",`R$ ${(hist.length?total/hist.length:0).toLocaleString("pt-BR",{minimumFractionDigits:2})}`,"📊")}
-    ${card("Veículo selecionado",window.__manutPrefixo||"Todos","🚚")}</div>
-    <div class="manut-dash-grid">
-      <section class="panel"><h3>🏆 Serviços mais realizados</h3>${serv.length?serv.map(([n,v],i)=>`<div class="rank-row"><b>${i+1}. ${escapeHtml(n)}</b><span>${v}</span><div class="rank-bar"><i style="width:${v/maxS*100}%"></i></div></div>`).join(""):"<p>Sem dados.</p>"}</section>
-      <section class="panel"><h3>🏢 Empresas mais utilizadas</h3>${empRank.length?empRank.map(([n,v],i)=>`<div class="rank-row"><b>${i+1}. ${escapeHtml(n)}</b><span>${v}</span><div class="rank-bar"><i style="width:${v/maxE*100}%"></i></div></div>`).join(""):"<p>Sem dados.</p>"}</section>
+    ${prefixo?`<section class="panel selected-vehicle">
+      <div><h2>🚚 Veículo ${escapeHtml(prefixo)}</h2><p>Histórico individual de manutenção${veiculoInfo?.placa?` • Placa ${escapeHtml(veiculoInfo.placa)}`:""}</p></div>
+      <div><b>${hist.length}</b><small> serviços no filtro</small></div>
+      <div><b>R$ ${total.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</b><small> gasto no período</small></div>
+    </section>`:""}
+    <div class="cards manut-kpis">
+      ${card("Gasto no período",`R$ ${total.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}`,"💰")}
+      ${card("Registros",hist.length,"🔧")}
+      ${card("Ticket médio",`R$ ${(hist.length?total/hist.length:0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}`,"📊")}
+      ${card("Veículo selecionado",prefixo||"Todos","🚚")}
     </div>
-    <section class="panel" style="margin-top:16px"><div class="os-head"><div><h3>📚 Histórico de manutenção ${window.__manutPrefixo?`— Veículo ${escapeHtml(window.__manutPrefixo)}`:""}</h3>
-    <p>${hist.length} lançamento(s) encontrados.</p></div><b>Total: R$ ${total.toLocaleString("pt-BR",{minimumFractionDigits:2})}</b></div>
-    <div class="table-wrap"><table><thead><tr><th>Data</th><th>Veículo</th><th>Serviço</th><th>Sistema</th><th>Produto / serviço executado</th><th>Empresa</th><th>NF</th><th>Local</th><th>Valor</th></tr></thead>
-    <tbody>${hist.map(x=>`<tr><td>${formatarDataBR(x.data_emissao||x.data_abertura)}</td><td><b>${fmt(x.prefixo)}</b></td><td>${fmt(x.servico||x.tipo)}</td><td>${fmt(x.sistema)}</td>
-    <td class="wrapcell">${escapeHtml(x.produto||x.descricao||"")}</td><td>${fmt(x.empresa)}</td><td>${fmt(x.nota_fiscal)}</td><td>${fmt(x.local)}</td><td><b>R$ ${Number(x.custo||0).toLocaleString("pt-BR",{minimumFractionDigits:2})}</b></td></tr>`).join("")}</tbody></table></div></section>`;
+    <div class="manut-dash-grid">
+      <section class="panel"><h3>🏆 Serviços mais realizados ${prefixo?`— ${escapeHtml(prefixo)}`:""}</h3>
+        ${serv.length?serv.map(([n,v],i)=>`<div class="rank-row"><b>${i+1}. ${escapeHtml(n)}</b><span>${v}</span><div class="rank-bar"><i style="width:${v/maxS*100}%"></i></div></div>`).join(""):"<p>Sem serviços para o filtro selecionado.</p>"}
+      </section>
+      <section class="panel"><h3>🏢 Empresas mais utilizadas ${prefixo?`— ${escapeHtml(prefixo)}`:""}</h3>
+        ${empRank.length?empRank.map(([n,v],i)=>`<div class="rank-row"><b>${i+1}. ${escapeHtml(n)}</b><span>${v}</span><div class="rank-bar"><i style="width:${v/maxE*100}%"></i></div></div>`).join(""):"<p>Sem empresas para o filtro selecionado.</p>"}
+      </section>
+    </div>
+    <section class="panel manut-history" style="margin-top:16px">
+      <div class="os-head"><div>
+        <h3>📚 ${prefixo?`Histórico individual — Veículo ${escapeHtml(prefixo)}`:"Histórico geral de manutenção"}</h3>
+        <p>${hist.length} serviço(s) encontrado(s). Cada linha abaixo representa um lançamento da manutenção.</p>
+      </div><div class="history-total">TOTAL<br><b>R$ ${total.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</b></div></div>
+      ${hist.length?`<div class="table-wrap"><table class="history-table"><thead><tr>
+        <th>Data</th><th>Veículo</th><th>Serviço</th><th>Sistema</th><th>Descrição / item executado</th><th>Loja / Empresa</th><th>NF</th><th>Local</th><th>Valor</th>
+      </tr></thead><tbody>${hist.map(x=>`<tr>
+        <td>${formatarDataBR(x.data_emissao||x.data_abertura)}</td>
+        <td><b>${fmt(x.prefixo||x.veiculo_prefixo)}</b></td>
+        <td><b>${fmt(x.servico||x.tipo)}</b></td>
+        <td>${fmt(x.sistema)}</td>
+        <td class="wrapcell">${escapeHtml(x.produto||x.descricao||"-")}</td>
+        <td><b>${fmt(x.empresa)}</b></td>
+        <td>${fmt(x.nota_fiscal)}</td>
+        <td>${fmt(x.local)}</td>
+        <td class="money-cell"><b>R$ ${Number(x.custo||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</b></td>
+      </tr>`).join("")}</tbody></table></div>`:
+      `<div class="empty-history"><b>Nenhuma manutenção encontrada para o veículo ${escapeHtml(prefixo||"selecionado")}.</b><br>Altere o período ou limpe os filtros.</div>`}
+    </section>`;
 }
 function modalNovaManutencao(){
   const opts=(window.__manutVeiculos||[]).map(v=>`<option>${escapeHtml(v.prefixo)}</option>`).join("");
