@@ -228,7 +228,40 @@ app.put("/api/veiculos/:id", auth, async (req,res) => {
     [prefixo,placa||null,tipo,modelo||null,capacidade_kg||0,km_atual||0,status||"Disponível",observacao||null,req.params.id]);
   res.json(r.rows[0]);
 });
+// EXCLUIR VEÍCULO
+app.delete("/api/veiculos/:id", autorizacao, async (requis, res) => {
+  try {
+    const id = requis.params.id;
 
+    const veiculo = await piscina.consulta(
+      "SELECT * FROM veiculos WHERE id=$1",
+      [id]
+    );
+
+    if (!veiculo.rowCount) {
+      return res.status(404).json({
+        erro: "Veículo não encontrado."
+      });
+    }
+
+    await piscina.consulta(
+      "DELETE FROM veiculos WHERE id=$1",
+      [id]
+    );
+
+    res.json({
+      sucesso: true,
+      mensagem: "Veículo excluído com sucesso."
+    });
+
+  } catch (erro) {
+    console.error("Erro ao excluir veículo:", erro);
+
+    res.status(500).json({
+      erro: "Não foi possível excluir o veículo. Verifique se existem registros vinculados."
+    });
+  }
+});
 app.get("/api/:recurso", auth, async (req,res,next) => {
   const allowed = ["colaboradores","expedicoes","pneus","manutencoes","abastecimentos","ocorrencias","checklists"];
   if (!allowed.includes(req.params.recurso)) return next();
