@@ -2116,6 +2116,61 @@ app.delete("/api/veiculos/:id", auth, async (req, res) => {
   }
 });
 
+
+// CONSULTA DE PNEUS POR VEÍCULO + ALERTAS DO DASHBOARD
+app.get("/api/pneus/veiculo/:prefixo", auth, async (req, res) => {
+  try {
+    const prefixo = String(req.params.prefixo || "").trim();
+    const v = await pool.query(
+      `SELECT id,prefixo,placa,tipo,modelo,capacidade_kg,km_atual,status,observacao
+       FROM veiculos WHERE prefixo=$1 LIMIT 1`, [prefixo]
+    );
+    if (!v.rowCount) return res.status(404).json({ erro: "Veículo não encontrado." });
+
+    const p = await pool.query(
+      `SELECT id,codigo,posicao,marca,modelo,sulco_mm,km_pneu,recapagens,custo,status
+       FROM pneus WHERE veiculo_id=$1 ORDER BY id`, [v.rows[0].id]
+    );
+
+    const resumo = { total:p.rowCount, bons:0, atencao:0, recapagem:0, criticos:0 };
+    for (const pneu of p.rows) {
+      const s = String(pneu.status || "").toLowerCase();
+      if (s.includes("crít") || s.includes("crit")) resumo.criticos++;
+      else if (s.includes("recap")) resumo.recapagem++;
+      else if (s.includes("aten")) resumo.atencao++;
+      else resumo.bons++;
+    }
+    res.json({ veiculo:v.rows[0], resumo, pneus:p.rows });
+  } catch (e) {
+    console.error("Erro consulta pneus/veículo:", e);
+    res.status(500).json({ erro:"Erro ao consultar pneus do veículo." });
+  }
+});
+
+app.get("/api/pneus-alertas", auth, async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT v.id, v.prefixo, v.placa, v.tipo, v.modelo,
+        COUNT(p.id)::int AS total_pneus,
+        COUNT(p.id) FILTER (WHERE LOWER(p.status) LIKE '%recap%')::int AS recapagem,
+        COUNT(p.id) FILTER (WHERE LOWER(p.status) LIKE '%crít%' OR LOWER(p.status) LIKE '%crit%')::int AS criticos
+      FROM veiculos v
+      JOIN pneus p ON p.veiculo_id=v.id
+      GROUP BY v.id,v.prefixo,v.placa,v.tipo,v.modelo
+      HAVING COUNT(p.id) FILTER (WHERE LOWER(p.status) LIKE '%recap%'
+          OR LOWER(p.status) LIKE '%crít%' OR LOWER(p.status) LIKE '%crit%') > 0
+      ORDER BY
+        COUNT(p.id) FILTER (WHERE LOWER(p.status) LIKE '%crít%' OR LOWER(p.status) LIKE '%crit%') DESC,
+        COUNT(p.id) FILTER (WHERE LOWER(p.status) LIKE '%recap%') DESC,
+        v.prefixo
+    `);
+    res.json(r.rows);
+  } catch (e) {
+    console.error("Erro alertas pneus:", e);
+    res.status(500).json({ erro:"Erro ao carregar alertas de pneus." });
+  }
+});
+
 app.get("/api/:recurso", auth, async (req,res,next) => {
   const allowed = ["colaboradores","expedicoes","pneus","manutencoes","abastecimentos","ocorrencias","checklists"];
   if (!allowed.includes(req.params.recurso)) return next();
