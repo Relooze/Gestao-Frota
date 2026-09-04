@@ -37,6 +37,7 @@ $("#nav").onclick=e=>{
   document.querySelectorAll("#nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");
   if(b.dataset.page==="dashboard") loadDashboard();
   else if(b.dataset.page==="pneus") loadPneus();
+  else if(b.dataset.page==="ordens-servico") loadOrdensServico();
   else loadList(b.dataset.page,b.textContent.trim());
 };
 
@@ -68,6 +69,50 @@ function card(t,n,i){return `<div class="card"><small>${i} ${t}</small><div clas
 function metric(t,n,total){const pc=total?Math.round(n/total*100):0;return `<div><small>${t} — ${n||0} (${pc}%)</small><div class="bar"><i style="width:${pc}%"></i></div></div>`}
 
 const labels={veiculos:"Frota",expedicoes:"Expedição",pneus:"Pneus",manutencoes:"Manutenção",checklists:"Checklist",abastecimentos:"Combustível",ocorrencias:"Ocorrências",colaboradores:"Equipe"};
+
+async function loadOrdensServico(){
+  $("#pageTitle").textContent="Ordens de Serviço";
+  $("#content").innerHTML=`<section class="panel"><h3>📋 Acompanhamento de Ordens de Serviço</h3><p>Carregando...</p></section>`;
+  try{
+    const rows=await api("/api/ordens-servico");
+    const abertas=rows.filter(o=>!/^conclu[ií]da$/i.test(String(o.status||"")));
+    const concluidas=rows.filter(o=>/^conclu[ií]da$/i.test(String(o.status||"")));
+    const aguardando=rows.filter(o=>/aguardando aprova/i.test(String(o.status||"")));
+    const execucao=rows.filter(o=>/execu/i.test(String(o.status||"")));
+    $("#content").innerHTML=`
+      <div class="cards os-summary">
+        ${card("O.S. em aberto",abertas.length,"📋")}
+        ${card("Aguardando aprovação",aguardando.length,"⏳")}
+        ${card("Em execução",execucao.length,"🛠")}
+        ${card("Concluídas",concluidas.length,"✅")}
+      </div>
+      <section class="panel" style="margin-top:16px">
+        <div class="os-head"><div><h3>Ordens em acompanhamento</h3><p>Consulte, atualize ou imprima uma O.S.</p></div>
+        <select id="filtroOS" style="max-width:240px"><option value="abertas">Em aberto</option><option value="todas">Todas</option><option value="concluidas">Concluídas</option></select></div>
+        <div id="listaOS"></div>
+      </section>`;
+    const render=()=>{
+      const f=$("#filtroOS").value;
+      const lista=f==="todas"?rows:f==="concluidas"?concluidas:abertas;
+      $("#listaOS").innerHTML=lista.length?`<div class="table-wrap"><table><thead><tr>
+        <th>O.S.</th><th>Veículo</th><th>Placa</th><th>Abertura</th><th>Status</th><th>Pendências</th><th>Valor</th><th>Ações</th>
+      </tr></thead><tbody>${lista.map(o=>`<tr>
+        <td><b>${fmt(o.numero)}</b></td><td>${fmt(o.prefixo)}</td><td>${fmt(o.placa)}</td>
+        <td>${formatarDataBR(o.data_abertura)}</td><td><span class="os-badge">${fmt(o.status)}</span></td>
+        <td>${Number(o.itens_pendentes||0)} / ${Number(o.total_itens||0)}</td>
+        <td>R$ ${Number(o.valor_orcado||0).toFixed(2).replace(".",",")}</td>
+        <td><button class="secondary" data-open-os="${o.id}">Abrir</button> <button class="secondary" data-print-os="${o.id}">🖨 Imprimir</button></td>
+      </tr>`).join("")}</tbody></table></div>`:`<p>Não há Ordens de Serviço nesta situação.</p>`;
+      $("#listaOS").querySelectorAll("[data-open-os]").forEach(b=>b.onclick=()=>abrirOS(b.dataset.openOs));
+      $("#listaOS").querySelectorAll("[data-print-os]").forEach(b=>b.onclick=()=>imprimirOS(b.dataset.printOs));
+    };
+    $("#filtroOS").onchange=render; render();
+  }catch(e){$("#content").innerHTML=`<section class="panel"><h3>Ordens de Serviço</h3><p>${fmt(e.message)}</p></section>`}
+}
+function formatarDataBR(v){
+  if(!v)return "-";const s=String(v).slice(0,10).split("-");return s.length===3?`${s[2]}/${s[1]}/${s[0]}`:fmt(v);
+}
+
 
 async function loadPneus(){
   $("#pageTitle").textContent="Pneus";
@@ -296,10 +341,11 @@ async function abrirOS(id){
           <label>Aprovado por<input name="aprovado_por" value="${escapeHtml(o.aprovado_por||"")}" placeholder="Nome do responsável pela aprovação"></label>
         </div>
         <label>Observação<textarea name="observacao" rows="3">${escapeHtml(o.observacao||"")}</textarea></label>
-        <div class="actions"><button type="button" class="secondary" id="cancelOS">Fechar</button><button class="primary">💾 Atualizar O.S.</button></div>
+        <div class="actions"><button type="button" class="secondary" id="imprimirOSAtual">🖨 Imprimir O.S.</button><button type="button" class="secondary" id="cancelOS">Fechar</button><button class="primary">💾 Atualizar O.S.</button></div>
       </form>
     </div></div>`);
     $("#fecharOS").onclick=$("#cancelOS").onclick=()=>$("#modalOS").remove();
+    $("#imprimirOSAtual").onclick=()=>imprimirOS(id);
     document.querySelectorAll(".os-value").forEach(x=>x.onchange=()=>salvarItemOS(x.dataset.item,{valor_estimado:x.value}));
     document.querySelectorAll(".os-item-status").forEach(x=>x.onchange=()=>salvarItemOS(x.dataset.item,{status:x.value}));
     $("#formOS").onsubmit=async e=>{e.preventDefault();const body=Object.fromEntries(new FormData(e.target));
@@ -308,6 +354,53 @@ async function abrirOS(id){
       }catch(x){alert(x.message)}};
   }catch(e){alert(e.message)}
 }
+
+async function imprimirOS(id){
+  try{
+    const d=await api(`/api/ordens-servico/${id}`),o=d.ordem;
+    const total=d.itens.reduce((s,i)=>s+Number(i.valor_estimado||0),0);
+    const w=window.open("","_blank","width=1000,height=800");
+    if(!w){alert("O navegador bloqueou a janela de impressão. Permita pop-ups para este site.");return;}
+    const doc=`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(o.numero)}</title>
+    <style>
+      @page{size:A4;margin:12mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;font-size:11px;margin:0}
+      .head{display:flex;justify-content:space-between;border-bottom:3px solid #0b2545;padding-bottom:10px;margin-bottom:12px}
+      h1{font-size:21px;margin:0;color:#0b2545}h2{font-size:14px;margin:14px 0 7px}.meta{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:10px 0}
+      .box{border:1px solid #aaa;padding:7px;min-height:43px}.label{font-size:9px;color:#555;text-transform:uppercase}.value{font-weight:bold;margin-top:3px}
+      table{width:100%;border-collapse:collapse;margin-top:7px}th,td{border:1px solid #aaa;padding:6px;text-align:left;vertical-align:top}th{background:#eaf1f8;font-size:9px;text-transform:uppercase}
+      .total{text-align:right;font-size:14px;font-weight:bold;margin-top:10px}.obs{border:1px solid #aaa;min-height:55px;padding:7px}
+      .sign{display:grid;grid-template-columns:1fr 1fr 1fr;gap:25px;margin-top:45px;text-align:center}.line{border-top:1px solid #222;padding-top:5px}
+      .check{font-size:15px}.footer{margin-top:18px;font-size:9px;color:#555;text-align:center}.no-print{margin:10px 0}
+      @media print{.no-print{display:none}}
+    </style></head><body>
+      <div class="no-print"><button onclick="window.print()">🖨 Imprimir</button></div>
+      <div class="head"><div><h1>ORDEM DE SERVIÇO</h1><b>FROTA & EXPEDIÇÃO</b></div><div style="text-align:right"><h1>${escapeHtml(o.numero)}</h1><div>Emissão: ${new Date().toLocaleDateString("pt-BR")}</div></div></div>
+      <div class="meta">
+        <div class="box"><div class="label">Veículo</div><div class="value">${escapeHtml(o.prefixo)}</div></div>
+        <div class="box"><div class="label">Placa</div><div class="value">${escapeHtml(o.placa||"-")}</div></div>
+        <div class="box"><div class="label">Tipo / Modelo</div><div class="value">${escapeHtml((o.tipo||"-")+" / "+(o.modelo||"-"))}</div></div>
+        <div class="box"><div class="label">Status</div><div class="value">${escapeHtml(o.status)}</div></div>
+      </div>
+      <h2>ITENS PARA CONFERÊNCIA / ORÇAMENTO</h2>
+      <table><thead><tr><th style="width:25px">OK</th><th>Origem</th><th>Serviço / Demanda</th><th>Prioridade</th><th>Valor orçado</th><th>Situação</th></tr></thead>
+      <tbody>${d.itens.map(i=>`<tr><td class="check">☐</td><td>${escapeHtml(i.origem)}</td><td>${escapeHtml(i.descricao)}</td><td>${escapeHtml(i.prioridade)}</td><td>R$ ${Number(i.valor_estimado||0).toFixed(2).replace(".",",")}</td><td>${escapeHtml(i.status)}</td></tr>`).join("")}</tbody></table>
+      <div class="total">VALOR TOTAL ORÇADO: R$ ${total.toFixed(2).replace(".",",")}</div>
+      <h2>OBSERVAÇÕES</h2><div class="obs">${escapeHtml(o.observacao||"")}</div>
+      <h2>APROVAÇÃO / EXECUÇÃO</h2>
+      <div class="meta">
+        <div class="box"><div class="label">Aprovado por</div><div class="value">${escapeHtml(o.aprovado_por||"")}</div></div>
+        <div class="box"><div class="label">Data aprovação</div><div class="value">${formatarDataBR(o.data_aprovacao)}</div></div>
+        <div class="box"><div class="label">Data conclusão</div><div class="value">${formatarDataBR(o.data_conclusao)}</div></div>
+        <div class="box"><div class="label">Situação final</div><div class="value">${escapeHtml(o.status)}</div></div>
+      </div>
+      <div class="sign"><div class="line">Responsável pela conferência</div><div class="line">Responsável pela aprovação</div><div class="line">Responsável pela execução</div></div>
+      <div class="footer">Documento gerado pelo sistema Gestão de Frota & Expedição • ${escapeHtml(o.numero)}</div>
+      <script>setTimeout(()=>window.print(),350)<\/script>
+    </body></html>`;
+    w.document.open();w.document.write(doc);w.document.close();
+  }catch(e){alert(e.message)}
+}
+
 async function salvarItemOS(id,body){try{await api(`/api/ordens-servico-itens/${id}`,{method:"PUT",body:JSON.stringify(body)});}catch(e){alert(e.message)}}
 
 

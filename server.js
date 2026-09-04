@@ -2346,6 +2346,31 @@ app.post("/api/ordens-servico/veiculo/:prefixo", auth, async (req,res) => {
   finally{client.release();}
 });
 
+
+app.get("/api/ordens-servico", auth, async (req,res) => {
+  try {
+    const r = await pool.query(`
+      SELECT os.id,os.numero,os.data_abertura,os.status,os.valor_orcado,os.aprovado_por,
+             os.data_aprovacao,os.data_conclusao,os.observacao,os.atualizado_em,
+             v.prefixo,v.placa,v.tipo,v.modelo,
+             COUNT(osi.id)::int AS total_itens,
+             COUNT(osi.id) FILTER (WHERE LOWER(osi.status) IN ('concluído','concluido'))::int AS itens_concluidos,
+             COUNT(osi.id) FILTER (WHERE LOWER(osi.status) NOT IN ('concluído','concluido'))::int AS itens_pendentes
+      FROM ordens_servico os
+      JOIN veiculos v ON v.id=os.veiculo_id
+      LEFT JOIN ordem_servico_itens osi ON osi.ordem_id=os.id
+      GROUP BY os.id,v.id
+      ORDER BY
+        CASE WHEN LOWER(os.status) IN ('concluída','concluida') THEN 1 ELSE 0 END,
+        os.id DESC
+    `);
+    res.json(r.rows);
+  } catch(e) {
+    console.error("Erro ao listar O.S.:",e);
+    res.status(500).json({erro:"Erro ao carregar acompanhamento das Ordens de Serviço."});
+  }
+});
+
 app.get("/api/ordens-servico/veiculo/:prefixo", auth, async (req,res) => {
   try {
     const r=await pool.query(`
