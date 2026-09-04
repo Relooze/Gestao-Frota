@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Gestão de Frota & Expedição</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div id="auth" class="auth">
+    <section class="auth-card">
+      <div class="brand-icon">🚚</div>
+      <h1>Frota & Expedição</h1>
+      <p id="authSubtitle">Gestão inteligente da operação</p>
+      <form id="setupForm" class="hidden">
+        <input id="setupNome" placeholder="Nome do administrador" required>
+        <input id="setupEmail" type="email" placeholder="E-mail" required>
+        <input id="setupSenha" type="password" placeholder="Senha (mín. 6 caracteres)" required minlength="6">
+        <button>Criar primeiro administrador</button>
+      </form>
+      <form id="loginForm" class="hidden">
+        <input id="loginEmail" type="email" placeholder="E-mail" required>
+        <input id="loginSenha" type="password" placeholder="Senha" required>
+        <button>Entrar</button>
+      </form>
+      <div id="authMsg" class="msg"></div>
+    </section>
+  </div>
+
+  <div id="app" class="shell hidden">
+    <aside>
+      <div class="logo">🚚 <span>FROTA &<br>EXPEDIÇÃO</span></div>
+      <nav id="nav">
+        <button data-page="dashboard" class="active">⌂ Dashboard</button>
+        <button data-page="expedicoes">▣ Expedição</button>
+        <button data-page="veiculos">🚛 Frota</button>
+        <button data-page="pneus">◉ Pneus</button>
+        <button data-page="manutencoes">🛠 Manutenção</button>
+        <button data-page="checklists">☑ Checklist</button>
+        <button data-page="abastecimentos">⛽ Combustível</button>
+        <button data-page="ocorrencias">⚠ Ocorrências</button>
+        <button data-page="colaboradores">👥 Equipe</button>
+      </nav>
+      <button id="logout" class="logout">Sair</button>
+    </aside>
+    <main>
+      <header><div><h2 id="pageTitle">Dashboard</h2><small>Visão geral da operação</small></div><div id="userBox"></div></header>
+      <div id="content"></div>
+    </main>
+  </div>
+<script src="/js/app.js"></script>
+</body>
+</html>

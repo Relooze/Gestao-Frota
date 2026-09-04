@@ -1,108 +1,243 @@
 const express = require("express");
+const path = require("path");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 const { Pool } = require("pg");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
+const JWT_SECRET = process.env.JWT_SECRET || "ALTERE_ESTA_CHAVE_NA_RAILWAY";
 
-// Permite receber JSON
-app.use(express.json());
-
-// Conexão com PostgreSQL
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl:
-    process.env.NODE_ENV === "production"
-      ? { rejectUnauthorized: false }
-      : false,
+  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false
 });
 
-// Página inicial
-app.get("/", (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="pt-BR">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Gestão de Frota & Expedição</title>
-      <style>
-        body {
-          margin: 0;
-          font-family: Arial, sans-serif;
-          background: #0b172a;
-          color: white;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          height: 100vh;
-        }
+app.use(express.json({ limit: "2mb" }));
+app.use(express.static(path.join(__dirname, "public")));
 
-        .box {
-          text-align: center;
-          background: #132238;
-          padding: 50px;
-          border-radius: 15px;
-          box-shadow: 0 10px 30px rgba(0,0,0,.35);
-        }
-
-        h1 {
-          margin-bottom: 10px;
-        }
-
-        .status {
-          margin-top: 25px;
-          color: #4ade80;
-          font-weight: bold;
-        }
-      </style>
-    </head>
-
-    <body>
-      <div class="box">
-        <h1>🚚 Gestão de Frota & Expedição</h1>
-        <p>Sistema de gerenciamento operacional</p>
-
-        <div class="status">
-          ● Servidor online
-        </div>
-      </div>
-    </body>
-    </html>
-  `);
-});
-
-// Teste da API
-app.get("/api/health", (req, res) => {
-  res.json({
-    sistema: "Gestão de Frota & Expedição",
-    servidor: "online",
-    data: new Date(),
-  });
-});
-
-// Teste do PostgreSQL
-app.get("/api/database", async (req, res) => {
-  try {
-    const resultado = await pool.query(
-      "SELECT NOW() AS horario"
+async function initDatabase() {
+  const sql = `
+    CREATE TABLE IF NOT EXISTS usuarios (
+      id SERIAL PRIMARY KEY,
+      nome VARCHAR(120) NOT NULL,
+      email VARCHAR(160) UNIQUE NOT NULL,
+      senha_hash TEXT NOT NULL,
+      perfil VARCHAR(30) NOT NULL DEFAULT 'operador',
+      ativo BOOLEAN NOT NULL DEFAULT TRUE,
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    res.json({
-      banco: "online",
-      postgres: true,
-      horario: resultado.rows[0].horario,
-    });
-  } catch (erro) {
-    console.error("Erro PostgreSQL:", erro.message);
+    CREATE TABLE IF NOT EXISTS veiculos (
+      id SERIAL PRIMARY KEY,
+      prefixo VARCHAR(30) UNIQUE NOT NULL,
+      placa VARCHAR(20),
+      tipo VARCHAR(40) NOT NULL,
+      modelo VARCHAR(80),
+      capacidade_kg NUMERIC(12,2) DEFAULT 0,
+      km_atual NUMERIC(12,1) DEFAULT 0,
+      status VARCHAR(30) NOT NULL DEFAULT 'Disponível',
+      observacao TEXT,
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
 
-    res.status(500).json({
-      banco: "offline",
-      postgres: false,
-      erro: "Não foi possível conectar ao banco.",
-    });
+    CREATE TABLE IF NOT EXISTS colaboradores (
+      id SERIAL PRIMARY KEY,
+      nome VARCHAR(120) NOT NULL,
+      funcao VARCHAR(50) NOT NULL,
+      telefone VARCHAR(30),
+      cnh VARCHAR(30),
+      validade_cnh DATE,
+      ativo BOOLEAN NOT NULL DEFAULT TRUE,
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS expedicoes (
+      id SERIAL PRIMARY KEY,
+      codigo VARCHAR(30) UNIQUE NOT NULL,
+      destino VARCHAR(180) NOT NULL,
+      peso_kg NUMERIC(12,2) DEFAULT 0,
+      volumes INTEGER DEFAULT 0,
+      veiculo_id INTEGER REFERENCES veiculos(id) ON DELETE SET NULL,
+      motorista_id INTEGER REFERENCES colaboradores(id) ON DELETE SET NULL,
+      previsao_entrega TIMESTAMPTZ,
+      status VARCHAR(40) NOT NULL DEFAULT 'Programada',
+      observacao TEXT,
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS pneus (
+      id SERIAL PRIMARY KEY,
+      codigo VARCHAR(40) UNIQUE NOT NULL,
+      veiculo_id INTEGER REFERENCES veiculos(id) ON DELETE SET NULL,
+      posicao VARCHAR(40),
+      marca VARCHAR(60),
+      modelo VARCHAR(60),
+      sulco_mm NUMERIC(5,2),
+      km_pneu NUMERIC(12,1) DEFAULT 0,
+      recapagens INTEGER DEFAULT 0,
+      custo NUMERIC(12,2) DEFAULT 0,
+      status VARCHAR(30) NOT NULL DEFAULT 'Bom',
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS manutencoes (
+      id SERIAL PRIMARY KEY,
+      veiculo_id INTEGER REFERENCES veiculos(id) ON DELETE CASCADE,
+      tipo VARCHAR(30) NOT NULL,
+      descricao TEXT NOT NULL,
+      data_abertura DATE NOT NULL DEFAULT CURRENT_DATE,
+      vencimento DATE,
+      custo NUMERIC(12,2) DEFAULT 0,
+      status VARCHAR(30) NOT NULL DEFAULT 'Aberta',
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS abastecimentos (
+      id SERIAL PRIMARY KEY,
+      veiculo_id INTEGER REFERENCES veiculos(id) ON DELETE CASCADE,
+      data DATE NOT NULL DEFAULT CURRENT_DATE,
+      km NUMERIC(12,1),
+      litros NUMERIC(12,2) NOT NULL,
+      valor_litro NUMERIC(12,3) NOT NULL,
+      valor_total NUMERIC(12,2),
+      posto VARCHAR(120),
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS ocorrencias (
+      id SERIAL PRIMARY KEY,
+      veiculo_id INTEGER REFERENCES veiculos(id) ON DELETE SET NULL,
+      expedicao_id INTEGER REFERENCES expedicoes(id) ON DELETE SET NULL,
+      tipo VARCHAR(60) NOT NULL,
+      descricao TEXT NOT NULL,
+      status VARCHAR(30) NOT NULL DEFAULT 'Aberta',
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS checklists (
+      id SERIAL PRIMARY KEY,
+      veiculo_id INTEGER REFERENCES veiculos(id) ON DELETE CASCADE,
+      colaborador_id INTEGER REFERENCES colaboradores(id) ON DELETE SET NULL,
+      itens JSONB NOT NULL DEFAULT '{}'::jsonb,
+      possui_critico BOOLEAN NOT NULL DEFAULT FALSE,
+      observacao TEXT,
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `;
+  await pool.query(sql);
+}
+
+function tokenFrom(req) {
+  const h = req.headers.authorization || "";
+  return h.startsWith("Bearer ") ? h.slice(7) : null;
+}
+function auth(req, res, next) {
+  try {
+    const token = tokenFrom(req);
+    if (!token) return res.status(401).json({ erro: "Não autenticado" });
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ erro: "Sessão inválida ou expirada" });
+  }
+}
+
+app.get("/api/health", (req, res) =>
+  res.json({ sistema: "Gestão de Frota & Expedição", servidor: "online", data: new Date() })
+);
+
+app.get("/api/database", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT NOW() horario");
+    res.json({ banco: "online", postgres: true, horario: r.rows[0].horario });
+  } catch (e) {
+    res.status(500).json({ banco: "offline", postgres: false, erro: e.message });
   }
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Servidor iniciado na porta ${PORT}`);
+app.get("/api/setup/status", async (req, res) => {
+  const r = await pool.query("SELECT COUNT(*)::int total FROM usuarios");
+  res.json({ precisa_configurar: r.rows[0].total === 0 });
 });
+
+app.post("/api/setup/admin", async (req, res) => {
+  const { nome, email, senha } = req.body;
+  if (!nome || !email || !senha || senha.length < 6)
+    return res.status(400).json({ erro: "Informe nome, e-mail e senha com pelo menos 6 caracteres." });
+
+  const count = await pool.query("SELECT COUNT(*)::int total FROM usuarios");
+  if (count.rows[0].total > 0)
+    return res.status(403).json({ erro: "Configuração inicial já concluída." });
+
+  const hash = await bcrypt.hash(senha, 12);
+  const r = await pool.query(
+    "INSERT INTO usuarios(nome,email,senha_hash,perfil) VALUES($1,$2,$3,'admin') RETURNING id,nome,email,perfil",
+    [nome.trim(), email.trim().toLowerCase(), hash]
+  );
+  res.status(201).json(r.rows[0]);
+});
+
+app.post("/api/login", async (req, res) => {
+  const { email, senha } = req.body;
+  const r = await pool.query("SELECT * FROM usuarios WHERE email=$1 AND ativo=TRUE", [(email || "").trim().toLowerCase()]);
+  if (!r.rowCount || !(await bcrypt.compare(senha || "", r.rows[0].senha_hash)))
+    return res.status(401).json({ erro: "E-mail ou senha inválidos." });
+
+  const u = r.rows[0];
+  const token = jwt.sign({ id: u.id, nome: u.nome, email: u.email, perfil: u.perfil }, JWT_SECRET, { expiresIn: "8h" });
+  res.json({ token, usuario: { id: u.id, nome: u.nome, email: u.email, perfil: u.perfil } });
+});
+
+app.get("/api/me", auth, (req, res) => res.json(req.user));
+
+app.get("/api/dashboard", auth, async (req, res) => {
+  const [v, e, p, m, o] = await Promise.all([
+    pool.query(`SELECT COUNT(*)::int total,
+      COUNT(*) FILTER (WHERE status='Disponível')::int disponiveis,
+      COUNT(*) FILTER (WHERE status='Em rota')::int em_rota,
+      COUNT(*) FILTER (WHERE status='Manutenção')::int manutencao FROM veiculos`),
+    pool.query(`SELECT COUNT(*)::int total,
+      COUNT(*) FILTER (WHERE status='Entregue')::int entregues,
+      COUNT(*) FILTER (WHERE status NOT IN ('Entregue','Cancelada'))::int pendentes FROM expedicoes`),
+    pool.query(`SELECT COUNT(*)::int total,
+      COUNT(*) FILTER (WHERE status='Bom')::int bons,
+      COUNT(*) FILTER (WHERE status='Recapagem')::int recapagem,
+      COUNT(*) FILTER (WHERE status='Crítico')::int criticos FROM pneus`),
+    pool.query(`SELECT COUNT(*) FILTER (WHERE status NOT IN ('Concluída','Cancelada'))::int abertas FROM manutencoes`),
+    pool.query(`SELECT COUNT(*) FILTER (WHERE status='Aberta')::int abertas FROM ocorrencias`)
+  ]);
+  res.json({ frota:v.rows[0], expedicoes:e.rows[0], pneus:p.rows[0], manutencoes:m.rows[0], ocorrencias:o.rows[0] });
+});
+
+app.get("/api/veiculos", auth, async (req,res) => {
+  const r = await pool.query("SELECT * FROM veiculos ORDER BY prefixo");
+  res.json(r.rows);
+});
+app.post("/api/veiculos", auth, async (req,res) => {
+  const { prefixo, placa, tipo, modelo, capacidade_kg, km_atual, status, observacao } = req.body;
+  if (!prefixo || !tipo) return res.status(400).json({erro:"Prefixo e tipo são obrigatórios."});
+  const r = await pool.query(`INSERT INTO veiculos(prefixo,placa,tipo,modelo,capacidade_kg,km_atual,status,observacao)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+    [prefixo,placa||null,tipo,modelo||null,capacidade_kg||0,km_atual||0,status||"Disponível",observacao||null]);
+  res.status(201).json(r.rows[0]);
+});
+app.put("/api/veiculos/:id", auth, async (req,res) => {
+  const { prefixo, placa, tipo, modelo, capacidade_kg, km_atual, status, observacao } = req.body;
+  const r = await pool.query(`UPDATE veiculos SET prefixo=$1,placa=$2,tipo=$3,modelo=$4,capacidade_kg=$5,km_atual=$6,status=$7,observacao=$8 WHERE id=$9 RETURNING *`,
+    [prefixo,placa||null,tipo,modelo||null,capacidade_kg||0,km_atual||0,status||"Disponível",observacao||null,req.params.id]);
+  res.json(r.rows[0]);
+});
+
+app.get("/api/:recurso", auth, async (req,res,next) => {
+  const allowed = ["colaboradores","expedicoes","pneus","manutencoes","abastecimentos","ocorrencias","checklists"];
+  if (!allowed.includes(req.params.recurso)) return next();
+  const r = await pool.query(`SELECT * FROM ${req.params.recurso} ORDER BY id DESC LIMIT 200`);
+  res.json(r.rows);
+});
+
+app.get("*", (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
+
+initDatabase()
+  .then(() => app.listen(PORT, "0.0.0.0", () => console.log(`Gestão-Frota online na porta ${PORT}`)))
+  .catch(err => { console.error("Falha ao iniciar banco:", err); process.exit(1); });
