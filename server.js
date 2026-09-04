@@ -229,7 +229,7 @@ app.put("/api/veiculos/:id", auth, async (req,res) => {
   res.json(r.rows[0]);
 });
 // EXCLUIR VEÍCULO
-app.delete("/api/veiculos/:id", autorizacao, async (requis, res) => {
+app.delete("/api/veiculos/:id", auth, async (requis, res) => {
   try {
     const id = requis.params.id;
 
