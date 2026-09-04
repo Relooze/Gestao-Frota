@@ -12,7 +12,17 @@ async function api(url,opt={}){
   return data;
 }
 async function boot(){
-  if(token){showApp();return loadDashboard();}
+  if(token){
+    showApp();
+    await checarPrimeiroAcesso();
+    await aplicarMenuPorPerfil();
+    if(String(user?.perfil||"").toLowerCase()==="motorista"){
+      const dia=await api("/api/motorista/veiculo-dia").catch(()=>null);
+      if(!dia) return abrirSelecaoVeiculoDia();
+      return loadDashboardMotorista();
+    }
+    return loadDashboard();
+  }
   const s=await api("/api/setup/status");
   $("#auth").classList.remove("hidden");
   if(s.precisa_configurar){$("#setupForm").classList.remove("hidden");$("#authSubtitle").textContent="Crie o primeiro administrador";}
@@ -27,7 +37,15 @@ $("#setupForm").onsubmit=async e=>{
 $("#loginForm").onsubmit=async e=>{
   e.preventDefault(); try{
     const r=await api("/api/login",{method:"POST",body:JSON.stringify({email:$("#loginEmail").value,senha:$("#loginSenha").value})});
-    token=r.token;user=r.usuario;localStorage.setItem("token",token);localStorage.setItem("user",JSON.stringify(user));showApp();loadDashboard();
+    token=r.token;user=r.usuario;localStorage.setItem("token",token);localStorage.setItem("user",JSON.stringify(user));showApp();
+    await checarPrimeiroAcesso();
+    await aplicarMenuPorPerfil();
+    if(String(user?.perfil||"").toLowerCase()==="motorista"){
+      const dia=await api("/api/motorista/veiculo-dia").catch(()=>null);
+      if(!dia) return abrirSelecaoVeiculoDia();
+      return loadDashboardMotorista();
+    }
+    loadDashboard();
   }catch(x){$("#authMsg").textContent=x.message}
 };
 function showApp(){$("#auth").classList.add("hidden");$("#app").classList.remove("hidden");$("#userBox").textContent=`Olá, ${user?.nome||"Gestor"} • ${user?.perfil||""}`;}
@@ -35,7 +53,7 @@ function logout(){localStorage.clear();location.reload()} $("#logout").onclick=l
 $("#nav").onclick=e=>{
   const b=e.target.closest("[data-page]");if(!b)return;
   document.querySelectorAll("#nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");
-  if(b.dataset.page==="dashboard") loadDashboard();
+  if(b.dataset.page==="dashboard") String(user?.perfil||"").toLowerCase()==="motorista"?loadDashboardMotorista():loadDashboard();
   else if(b.dataset.page==="pneus") loadPneus();
   else if(b.dataset.page==="ordens-servico") loadOrdensServico();
   else if(b.dataset.page==="manutencao-caminhoes") loadManutencaoCategoria("CAMINHAO");
@@ -49,6 +67,46 @@ $("#nav").onclick=e=>{
   else if(b.dataset.page==="perfil-motorista") loadPerfilMotorista();
   else loadList(b.dataset.page,b.textContent.trim());
 };
+
+
+async function loadDashboardMotorista(){
+  $("#pageTitle").textContent="Meu Veículo Hoje";
+  try{
+    const d=await api("/api/motorista/dashboard");
+    const v=d.veiculo,p=d.pneus;
+    const alertas=[];
+    if(Number(p.criticos)>0) alertas.push(`<div class="driver-alert critical">🔴 <b>${p.criticos} pneu(s) CRÍTICO(S)</b><br>Necessária avaliação/troca imediata.</div>`);
+    if(Number(p.recapagem)>0) alertas.push(`<div class="driver-alert recap">🟠 <b>${p.recapagem} pneu(s) para RECAPAGEM</b><br>Informar ao supervisor e acompanhar programação.</div>`);
+    if(Number(p.atencao)>0) alertas.push(`<div class="driver-alert attention">🟡 <b>${p.atencao} pneu(s) em ATENÇÃO</b><br>Acompanhar condição durante a operação.</div>`);
+    if(Number(d.os_abertas)>0) alertas.push(`<div class="driver-alert os">🔧 <b>${d.os_abertas} O.S. em aberto</b> para este veículo.</div>`);
+    if(Number(d.chamados_abertos)>0) alertas.push(`<div class="driver-alert os">🆘 <b>${d.chamados_abertos} chamado(s) em aberto</b>.</div>`);
+    if(!d.checklist) alertas.unshift(`<div class="driver-alert critical">☑ <b>CHECKLIST DIÁRIO PENDENTE</b><br>Realize o checklist antes de sair com o veículo.</div>`);
+
+    $("#content").innerHTML=`<section class="panel driver-vehicle">
+      <div><small>VEÍCULO SELECIONADO PARA HOJE</small><h2>🚚 ${escapeHtml(v.prefixo)}</h2>
+      <p><b>Placa:</b> ${escapeHtml(v.placa||"-")} &nbsp; <b>Modelo:</b> ${escapeHtml(v.modelo||"-")} &nbsp; <b>Tipo:</b> ${escapeHtml(v.tipo||"-")}</p></div>
+      <div><span class="driver-status">${escapeHtml(v.status||"-")}</span></div>
+    </section>
+    <div class="cards driver-cards">
+      ${card("Pneus bons",p.bons,"🟢")}${card("Atenção",p.atencao,"🟡")}${card("Recapagem",p.recapagem,"🟠")}${card("Críticos",p.criticos,"🔴")}
+      ${card("O.S. abertas",d.os_abertas,"🔧")}${card("Chamados",d.chamados_abertos,"🆘")}
+    </div>
+    <section class="panel" style="margin-top:16px"><h3>⚠️ Alertas do veículo de hoje</h3>
+      <div class="driver-alerts">${alertas.join("")||'<div class="driver-alert ok">✅ Nenhum alerta operacional para o veículo.</div>'}</div>
+    </section>
+    <section class="panel driver-actions" style="margin-top:16px"><h3>Ações do motorista</h3>
+      <button class="primary" data-driver-go="checklist-diario">☑ Fazer Checklist Diário</button>
+      <button class="secondary" data-driver-go="abertura-chamado">🆘 Abrir Chamado</button>
+      <button class="secondary" data-driver-go="minhas-os">🔧 Ver O.S. em andamento</button>
+    </section>`;
+    document.querySelectorAll("[data-driver-go]").forEach(b=>b.onclick=()=>{
+      document.querySelector(`[data-page="${b.dataset.driverGo}"]`)?.click();
+    });
+  }catch(e){
+    if(e.message==="SELECIONAR_VEICULO_DIA") return abrirSelecaoVeiculoDia();
+    $("#content").innerHTML=`<section class="panel"><h3>Dashboard do motorista</h3><p>${escapeHtml(e.message)}</p></section>`;
+  }
+}
 
 async function loadDashboard(){
   $("#pageTitle").textContent="Dashboard";
@@ -668,11 +726,13 @@ async function aplicarMenuPorPerfil(){
   try{
     const s=await api("/api/sessao");
     window.__sessao=s;
+    user={...(user||{}),...s}; localStorage.setItem("user",JSON.stringify(user));
     const motorista=String(s.perfil||"").toLowerCase()==="motorista";
-    const permitidasMotorista=["checklist-diario","abertura-chamado","minhas-os","perfil-motorista"];
-    document.querySelectorAll("[data-page]").forEach(b=>{
-      if(motorista) b.style.display=permitidasMotorista.includes(b.dataset.page)?"":"none";
-      else b.style.display="";
+    const permitidasMotorista=["dashboard","checklist-diario","abertura-chamado","minhas-os","perfil-motorista"];
+    document.body.classList.toggle("perfil-motorista",motorista);
+    document.querySelectorAll("#nav [data-page]").forEach(b=>{
+      b.hidden=motorista && !permitidasMotorista.includes(b.dataset.page);
+      b.style.display=(motorista && !permitidasMotorista.includes(b.dataset.page))?"none":"";
     });
     if(motorista){
       const dia=await api("/api/motorista/veiculo-dia");
@@ -693,6 +753,7 @@ async function abrirSelecaoVeiculoDia(){
   $("#formVeiculoDia").onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.target);try{
     await api("/api/motorista/veiculo-dia",{method:"POST",body:JSON.stringify({veiculo_id:Number(fd.get("veiculo_id"))})});
     $("#modalVeiculoDia").remove();
+    await aplicarMenuPorPerfil();
     const b=document.querySelector('[data-page="checklist-diario"]'); if(b){b.click()} else loadChecklistDiario();
   }catch(x){alert(x.message)}};
 }
@@ -742,4 +803,4 @@ window.deleteVehicle=async(id,prefixo)=>{if(!confirm(`Excluir o veículo ${prefi
 
 boot().catch(e=>{$("#auth").classList.remove("hidden");$("#authMsg").textContent="Falha ao iniciar: "+e.message});
 
-setTimeout(async()=>{ if(localStorage.getItem("token")){ await checarPrimeiroAcesso(); await aplicarMenuPorPerfil(); } },300);
+

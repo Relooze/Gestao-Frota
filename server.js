@@ -2161,6 +2161,64 @@ app.post("/api/login", async (req, res) => {
 
 app.get("/api/me", auth, (req, res) => res.json(req.user));
 
+
+// ======================================================
+// V2.8 - SEGURANÇA REAL DO PERFIL MOTORISTA
+// Bloqueia APIs administrativas, mesmo por URL direta.
+// ======================================================
+app.use("/api", (req,res,next)=>{
+  try{
+    const token=tokenFrom(req);
+    if(!token) return next();
+    const u=jwt.verify(token,JWT_SECRET);
+    if(String(u.perfil||"").toLowerCase()!=="motorista") return next();
+
+    const p=req.path;
+    const permitidos=[
+      /^\/sessao$/,
+      /^\/motorista(\/|$)/,
+      /^\/checklist-diario(\/|$)/,
+      /^\/chamados$/,
+      /^\/chamados\/meus$/,
+      /^\/veiculos$/  // somente GET; usado para escolher o veículo do dia
+    ];
+    const ok=permitidos.some(rx=>rx.test(p));
+    if(!ok) return res.status(403).json({erro:"Acesso não permitido para o perfil motorista."});
+    if(p==="/veiculos" && req.method!=="GET")
+      return res.status(403).json({erro:"Motorista não pode alterar dados da frota."});
+    next();
+  }catch(e){next()}
+});
+
+app.get("/api/motorista/dashboard",auth,async(req,res)=>{
+  if(String(req.user.perfil||"").toLowerCase()!=="motorista")
+    return res.status(403).json({erro:"Acesso exclusivo do motorista."});
+
+  const vd=await pool.query(`SELECT m.veiculo_id,v.prefixo,v.placa,v.modelo,v.tipo,v.status
+    FROM motorista_veiculo_dia m JOIN veiculos v ON v.id=m.veiculo_id
+    WHERE m.usuario_id=$1 AND m.data_operacao=CURRENT_DATE`,[req.user.id]);
+  if(!vd.rowCount) return res.status(409).json({erro:"SELECIONAR_VEICULO_DIA"});
+  const v=vd.rows[0];
+
+  const [p,ck,ch,os]=await Promise.all([
+    pool.query(`SELECT COUNT(*)::int total,
+      COUNT(*) FILTER(WHERE status='Bom')::int bons,
+      COUNT(*) FILTER(WHERE status='Recapagem')::int recapagem,
+      COUNT(*) FILTER(WHERE status='Crítico')::int criticos,
+      COUNT(*) FILTER(WHERE UPPER(COALESCE(classificacao,'')) LIKE '%ATEN%')::int atencao
+      FROM pneus WHERE veiculo_id=$1`,[v.veiculo_id]),
+    pool.query(`SELECT id,status_tratamento,possui_critico,criado_em FROM checklists
+      WHERE usuario_id=$1 AND veiculo_id=$2 AND data_checklist=CURRENT_DATE ORDER BY id DESC LIMIT 1`,
+      [req.user.id,v.veiculo_id]),
+    pool.query(`SELECT COUNT(*) FILTER(WHERE status NOT IN ('Concluído','Concluida','Concluída','Cancelado','Cancelada'))::int abertos
+      FROM chamados WHERE usuario_id=$1 AND veiculo_id=$2`,[req.user.id,v.veiculo_id]),
+    pool.query(`SELECT COUNT(*) FILTER(WHERE status NOT IN ('Concluída','Concluida','Cancelada','Cancelado'))::int abertas
+      FROM ordens_servico WHERE veiculo_id=$1`,[v.veiculo_id])
+  ]);
+  res.json({veiculo:v,pneus:p.rows[0],checklist:ck.rows[0]||null,
+    chamados_abertos:ch.rows[0].abertos,os_abertas:os.rows[0].abertas});
+});
+
 app.get("/api/dashboard", auth, async (req, res) => {
   const [v, e, p, m, o] = await Promise.all([
     pool.query(`SELECT COUNT(*)::int total,

@@ -29,3 +29,14 @@
  .profile-grid{grid-template-columns:1fr}
  body.motorista .sidebar{width:100%;min-height:auto}
 }
+
+#nav [hidden]{display:none!important}
+body.perfil-motorista #nav{display:flex;flex-direction:column}
+body.perfil-motorista #nav button[hidden]{display:none!important}
+.driver-vehicle{display:flex;justify-content:space-between;align-items:center;gap:16px}
+.driver-status{display:inline-block;padding:8px 12px;border-radius:999px;background:#eaf3ff;font-weight:800}
+.driver-alerts{display:grid;gap:10px}.driver-alert{padding:14px;border-radius:12px;border:1px solid #d9e2ec}
+.driver-alert.critical{background:#fee2e2;border-color:#fca5a5}.driver-alert.recap{background:#fff7ed;border-color:#fdba74}
+.driver-alert.attention{background:#fefce8;border-color:#fde047}.driver-alert.os{background:#eff6ff;border-color:#93c5fd}
+.driver-alert.ok{background:#ecfdf5;border-color:#86efac}.driver-actions{display:flex;gap:10px;flex-wrap:wrap}
+@media(max-width:800px){.driver-vehicle{align-items:flex-start;flex-direction:column}.driver-cards{grid-template-columns:1fr 1fr}}

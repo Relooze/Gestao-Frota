@@ -58,3 +58,12 @@ Menu do motorista fica limitado a:
 
 O motorista não visualiza Dashboard geral, Frota, Pneus, Manutenção, Usuários, Tratamento, Combustível, Ocorrências ou Equipe.
 As O.S. exibidas ao motorista são vinculadas ao veículo selecionado para o dia.
+
+
+## V2.8 — Correção definitiva do perfil Motorista
+- Corrigido o carregamento que mostrava Dashboard/Frota antes da aplicação do perfil.
+- Menu do motorista limitado a Dashboard do Motorista, Meu Perfil, Checklist Diário, Abertura de Chamado e Andamento das O.S.
+- Bloqueio de APIs administrativas no servidor para perfil motorista.
+- Dashboard do motorista mostra somente o veículo selecionado no dia.
+- Alertas: checklist pendente, pneus em atenção, recapagem, críticos, chamados e O.S. abertas.
+- Ao selecionar o veículo do dia, motorista é enviado diretamente ao Checklist Diário.
