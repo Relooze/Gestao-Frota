@@ -236,7 +236,9 @@ app.get("/api/:recurso", auth, async (req,res,next) => {
   res.json(r.rows);
 });
 
-app.get("*", (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
+app.use((req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
 
 initDatabase()
   .then(() => app.listen(PORT, "0.0.0.0", () => console.log(`Gestão-Frota online na porta ${PORT}`)))
