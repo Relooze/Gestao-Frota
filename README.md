@@ -80,3 +80,9 @@ As O.S. exibidas ao motorista são vinculadas ao veículo selecionado para o dia
 
 ## V3.0 — Template Profissional COMJOL
 Identidade visual COMJOL integrada, sidebar corporativa azul, detalhes laranja, cards/tabelas/formulários modernizados e menu recolhível no celular. Todas as funções da V2.9 e o PostgreSQL são preservados.
+
+
+## V3.1 — Veículo obrigatório a cada login do motorista
+- Em todo novo login do perfil motorista, o sistema solicita o veículo que será utilizado.
+- Após confirmar o veículo, o motorista é encaminhado diretamente ao Checklist Diário.
+- A escolha fica vinculada à sessão de login, evitando pular a seleção apenas porque já houve uso do veículo no mesmo dia.

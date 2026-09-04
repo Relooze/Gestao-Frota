@@ -16,11 +16,7 @@ async function boot(){
     showApp();
     await checarPrimeiroAcesso();
     await aplicarMenuPorPerfil();
-    if(String(user?.perfil||"").toLowerCase()==="motorista"){
-      const dia=await api("/api/motorista/veiculo-dia").catch(()=>null);
-      if(!dia) return abrirSelecaoVeiculoDia();
-      return loadDashboardMotorista();
-    }
+    if(String(user?.perfil||"").toLowerCase()==="motorista"){ return abrirSelecaoVeiculoDia(); }
     return loadDashboard();
   }
   const s=await api("/api/setup/status");
@@ -40,11 +36,7 @@ $("#loginForm").onsubmit=async e=>{
     token=r.token;user=r.usuario;localStorage.setItem("token",token);localStorage.setItem("user",JSON.stringify(user));showApp();
     await checarPrimeiroAcesso();
     await aplicarMenuPorPerfil();
-    if(String(user?.perfil||"").toLowerCase()==="motorista"){
-      const dia=await api("/api/motorista/veiculo-dia").catch(()=>null);
-      if(!dia) return abrirSelecaoVeiculoDia();
-      return loadDashboardMotorista();
-    }
+    if(String(user?.perfil||"").toLowerCase()==="motorista"){ return abrirSelecaoVeiculoDia(); }
     loadDashboard();
   }catch(x){$("#authMsg").textContent=x.message}
 };

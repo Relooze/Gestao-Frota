@@ -86,6 +86,8 @@ async function initDatabase() {
     );
 
     ALTER TABLE pneus ADD COLUMN IF NOT EXISTS classificacao VARCHAR(40);
+
+    await pool.query(`ALTER TABLE motorista_veiculo_dia ADD COLUMN IF NOT EXISTS login_session_id VARCHAR(80)`);
     ALTER TABLE pneus ADD COLUMN IF NOT EXISTS acao_sugerida TEXT;
     ALTER TABLE pneus ADD COLUMN IF NOT EXISTS ultima_inspecao DATE;
     ALTER TABLE pneus ADD COLUMN IF NOT EXISTS observacao TEXT;
@@ -2196,7 +2198,7 @@ app.get("/api/motorista/dashboard",auth,async(req,res)=>{
 
   const vd=await pool.query(`SELECT m.veiculo_id,v.prefixo,v.placa,v.modelo,v.tipo,v.status
     FROM motorista_veiculo_dia m JOIN veiculos v ON v.id=m.veiculo_id
-    WHERE m.usuario_id=$1 AND m.data_operacao=CURRENT_DATE`,[req.user.id]);
+    WHERE m.usuario_id=$1 AND m.data_operacao=CURRENT_DATE AND m.login_session_id=$2`,[req.user.id,req.user.sessao_login]);
   if(!vd.rowCount) return res.status(409).json({erro:"SELECIONAR_VEICULO_DIA"});
   const v=vd.rows[0];
 
@@ -2624,7 +2626,7 @@ app.get("/api/manutencao/ativos/:categoria", auth, async (req,res) => {
 
 async function exigirSenhaAtualizada(req,res,next){
   try{
-    const r=await pool.query("SELECT primeiro_acesso FROM usuarios WHERE id=$1",[req.user.id]);
+    const r=await pool.query("SELECT primeiro_acesso FROM usuarios WHERE id=$1",[req.user.id,req.user.sessao_login]);
     if(r.rows[0]?.primeiro_acesso) return res.status(428).json({erro:"ALTERAR_SENHA_PRIMEIRO_ACESSO"});
     next();
   }catch(e){res.status(500).json({erro:"Erro ao validar usuário."})}
@@ -2697,8 +2699,8 @@ app.get("/api/checklist-diario/config",auth,async(req,res)=>{
     FROM usuarios u
     LEFT JOIN motorista_veiculo_dia md ON md.usuario_id=u.id AND md.data_operacao=CURRENT_DATE
     LEFT JOIN veiculos v ON v.id=COALESCE(md.veiculo_id,u.veiculo_id)
-    WHERE u.id=$1`,[req.user.id]);
-  const hoje=await pool.query(`SELECT id,status_tratamento,criado_em FROM checklists WHERE usuario_id=$1 AND data_checklist=CURRENT_DATE ORDER BY id DESC LIMIT 1`,[req.user.id]);
+    WHERE u.id=$1`,[req.user.id,req.user.sessao_login]);
+  const hoje=await pool.query(`SELECT id,status_tratamento,criado_em FROM checklists WHERE usuario_id=$1 AND data_checklist=CURRENT_DATE ORDER BY id DESC LIMIT 1`,[req.user.id,req.user.sessao_login]);
   res.json({usuario:u.rows[0],itens:CHECKLIST_DIARIO_ITENS,checklist_hoje:hoje.rows[0]||null});
 });
 
@@ -2711,7 +2713,7 @@ app.post("/api/checklist-diario",auth,async(req,res)=>{
       if(itens[i].item!==CHECKLIST_DIARIO_ITENS[i]||!["EXCELENTE","BOM","REGULAR","RUIM","CRITICO","NA"].includes(itens[i].status))
         return res.status(400).json({erro:`Preencha corretamente o item ${i+1}.`});
     }
-    const ja=await pool.query(`SELECT id FROM checklists WHERE usuario_id=$1 AND veiculo_id=$2 AND data_checklist=CURRENT_DATE`,[req.user.id,veiculo_id]);
+    const ja=await pool.query(`SELECT id FROM checklists WHERE usuario_id=$1 AND veiculo_id=$2 AND data_checklist=CURRENT_DATE`,[req.user.id,veiculo_id,req.user.sessao_login]);
     if(ja.rowCount)return res.status(400).json({erro:"Checklist deste veículo já enviado hoje por este motorista."});
     const crit=itens.some(x=>["RUIM","CRITICO"].includes(x.status));
     const r=await pool.query(`INSERT INTO checklists(veiculo_id,usuario_id,itens,possui_critico,observacao,data_checklist,status_tratamento)
@@ -2765,14 +2767,14 @@ app.put("/api/checklist-tratamento/:id/status",auth,somenteAdminSupervisor,async
 app.get("/api/sessao",auth,async(req,res)=>{
   const r=await pool.query(`SELECT u.id,u.nome,u.email,u.perfil,u.ativo,u.primeiro_acesso,u.veiculo_id,
     v.prefixo veiculo_prefixo,v.placa,v.modelo
-    FROM usuarios u LEFT JOIN veiculos v ON v.id=u.veiculo_id WHERE u.id=$1`,[req.user.id]);
+    FROM usuarios u LEFT JOIN veiculos v ON v.id=u.veiculo_id WHERE u.id=$1`,[req.user.id,req.user.sessao_login]);
   res.json(r.rows[0]);
 });
 
 app.get("/api/motorista/minhas-os",auth,exigirSenhaAtualizada,async(req,res)=>{
   const u=await pool.query(`SELECT COALESCE(
     (SELECT veiculo_id FROM motorista_veiculo_dia WHERE usuario_id=$1 AND data_operacao=CURRENT_DATE),
-    (SELECT veiculo_id FROM usuarios WHERE id=$1)) veiculo_id`,[req.user.id]);
+    (SELECT veiculo_id FROM usuarios WHERE id=$1)) veiculo_id`,[req.user.id,req.user.sessao_login]);
   const vid=u.rows[0]?.veiculo_id;
   if(!vid)return res.json([]);
   const r=await pool.query(`SELECT os.*,v.prefixo,v.placa,
@@ -2786,7 +2788,7 @@ app.post("/api/chamados",auth,exigirSenhaAtualizada,async(req,res)=>{
   try{
     const u=await pool.query(`SELECT u.perfil,COALESCE(
       (SELECT veiculo_id FROM motorista_veiculo_dia WHERE usuario_id=u.id AND data_operacao=CURRENT_DATE),
-      u.veiculo_id) veiculo_id FROM usuarios u WHERE u.id=$1`,[req.user.id]);
+      u.veiculo_id) veiculo_id FROM usuarios u WHERE u.id=$1`,[req.user.id,req.user.sessao_login]);
     let vid=req.body.veiculo_id||u.rows[0]?.veiculo_id;
     if(!vid)return res.status(400).json({erro:"Usuário sem veículo associado."});
     const titulo=String(req.body.titulo||"").trim(),descricao=String(req.body.descricao||"").trim();
@@ -2801,7 +2803,7 @@ app.post("/api/chamados",auth,exigirSenhaAtualizada,async(req,res)=>{
 
 app.get("/api/chamados/meus",auth,exigirSenhaAtualizada,async(req,res)=>{
   const r=await pool.query(`SELECT c.*,v.prefixo,v.placa FROM chamados c JOIN veiculos v ON v.id=c.veiculo_id
-    WHERE c.usuario_id=$1 ORDER BY c.criado_em DESC`,[req.user.id]);
+    WHERE c.usuario_id=$1 ORDER BY c.criado_em DESC`,[req.user.id,req.user.sessao_login]);
   res.json(r.rows);
 });
 
@@ -2848,7 +2850,7 @@ function somenteMotorista(req,res,next){
 app.get("/api/motorista/veiculo-dia",auth,somenteMotorista,async(req,res)=>{
   const r=await pool.query(`SELECT m.veiculo_id,v.prefixo,v.placa,v.modelo
     FROM motorista_veiculo_dia m JOIN veiculos v ON v.id=m.veiculo_id
-    WHERE m.usuario_id=$1 AND m.data_operacao=CURRENT_DATE`,[req.user.id]);
+    WHERE m.usuario_id=$1 AND m.data_operacao=CURRENT_DATE AND m.login_session_id=$2`,[req.user.id,req.user.sessao_login]);
   res.json(r.rows[0]||null);
 });
 
@@ -2857,15 +2859,15 @@ app.post("/api/motorista/veiculo-dia",auth,somenteMotorista,async(req,res)=>{
   if(!vid)return res.status(400).json({erro:"Selecione o veículo que utilizará hoje."});
   const v=await pool.query("SELECT id,prefixo,placa,modelo FROM veiculos WHERE id=$1",[vid]);
   if(!v.rowCount)return res.status(404).json({erro:"Veículo não encontrado."});
-  await pool.query(`INSERT INTO motorista_veiculo_dia(usuario_id,veiculo_id,data_operacao)
-    VALUES($1,$2,CURRENT_DATE)
+  await pool.query(`INSERT INTO motorista_veiculo_dia(usuario_id,veiculo_id,data_operacao,login_session_id)
+    VALUES($1,$2,CURRENT_DATE,$3)
     ON CONFLICT(usuario_id,data_operacao) DO UPDATE SET veiculo_id=EXCLUDED.veiculo_id,criado_em=NOW()`,
     [req.user.id,vid]);
   res.json({sucesso:true,...v.rows[0]});
 });
 
 app.get("/api/motorista/perfil",auth,somenteMotorista,async(req,res)=>{
-  const r=await pool.query("SELECT id,nome,email,perfil FROM usuarios WHERE id=$1",[req.user.id]);
+  const r=await pool.query("SELECT id,nome,email,perfil FROM usuarios WHERE id=$1",[req.user.id,req.user.sessao_login]);
   res.json(r.rows[0]);
 });
 
@@ -2881,7 +2883,7 @@ app.put("/api/motorista/perfil",auth,somenteMotorista,async(req,res)=>{
 app.put("/api/motorista/alterar-senha",auth,somenteMotorista,async(req,res)=>{
   const atual=String(req.body.senha_atual||""),nova=String(req.body.nova_senha||"");
   if(nova.length<6)return res.status(400).json({erro:"A nova senha deve ter no mínimo 6 caracteres."});
-  const u=await pool.query("SELECT senha_hash FROM usuarios WHERE id=$1",[req.user.id]);
+  const u=await pool.query("SELECT senha_hash FROM usuarios WHERE id=$1",[req.user.id,req.user.sessao_login]);
   if(!u.rowCount||!(await bcrypt.compare(atual,u.rows[0].senha_hash)))return res.status(400).json({erro:"Senha atual incorreta."});
   const hash=await bcrypt.hash(nova,12);
   await pool.query("UPDATE usuarios SET senha_hash=$1,primeiro_acesso=FALSE,senha_alterada_em=NOW() WHERE id=$2",[hash,req.user.id]);
@@ -2891,7 +2893,7 @@ app.put("/api/motorista/alterar-senha",auth,somenteMotorista,async(req,res)=>{
 app.get("/api/motorista/contexto-dia",auth,somenteMotorista,async(req,res)=>{
   const r=await pool.query(`SELECT m.veiculo_id,v.prefixo,v.placa,v.modelo
     FROM motorista_veiculo_dia m JOIN veiculos v ON v.id=m.veiculo_id
-    WHERE m.usuario_id=$1 AND m.data_operacao=CURRENT_DATE`,[req.user.id]);
+    WHERE m.usuario_id=$1 AND m.data_operacao=CURRENT_DATE AND m.login_session_id=$2`,[req.user.id,req.user.sessao_login]);
   res.json(r.rows[0]||null);
 });
 
