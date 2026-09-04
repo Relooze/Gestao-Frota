@@ -51,7 +51,8 @@ $("#nav").onclick=e=>{
   document.querySelectorAll("#nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");
   if(b.dataset.page==="dashboard") String(user?.perfil||"").toLowerCase()==="motorista"?loadDashboardMotorista():loadDashboard();
   else if(b.dataset.page==="pneus") loadPneus();
-  else if(b.dataset.page==="ordens-servico") loadOrdensServico();
+  else if(b.dataset.page==="ordens-finalizadas") loadOrdensFinalizadas();
+    if(b.dataset.page==="ordens-servico") loadOrdensServico();
   else if(b.dataset.page==="manutencao-caminhoes") loadManutencaoCategoria("CAMINHAO");
   else if(b.dataset.page==="manutencao-empilhadeiras") loadManutencaoCategoria("EMPILHADEIRA");
   else if(b.dataset.page==="checklist-diario") loadChecklistDiario();
@@ -840,3 +841,30 @@ document.addEventListener("click",(e)=>{
  if(e.target?.id==="mobileMenuBtn"){document.body.classList.toggle("sidebar-open");return;}
  if(window.innerWidth<=900 && e.target?.closest?.("#nav [data-page]"))document.body.classList.remove("sidebar-open");
 });
+
+async function finalizarOrdemServico(id){
+  if(!confirm("Confirma a FINALIZAÇÃO desta Ordem de Serviço? Ela sairá do acompanhamento de abertas e irá para o histórico do veículo."))return;
+  try{await api(`/api/ordens-servico/${id}/finalizar`,{method:"PUT"});alert("O.S. finalizada e enviada para o histórico do veículo.");loadOrdensServico?.();}
+  catch(e){alert(e.message)}
+}
+async function finalizarChamado(id){
+  if(!confirm("Confirma a FINALIZAÇÃO deste chamado?"))return;
+  try{await api(`/api/chamados/${id}/finalizar`,{method:"PUT"});alert("Chamado finalizado.");loadChamadosAbertos?.();}
+  catch(e){alert(e.message)}
+}
+async function loadOrdensFinalizadas(){
+  $("#pageTitle").textContent="Ordens Finalizadas";
+  const vs=await api("/api/veiculos");
+  $("#content").innerHTML=`<section class="panel"><div class="v32-title"><div><h2>✅ Histórico de Ordens Finalizadas</h2><p>Consulte serviços concluídos por veículo e período.</p></div></div>
+  <div class="v32-filters"><label>Veículo<select id="histVeiculo"><option value="">Todos</option>${vs.map(v=>`<option value="${v.id}">${escapeHtml(v.prefixo)} • ${escapeHtml(v.placa||"-")}</option>`).join("")}</select></label>
+  <label>Data inicial<input type="date" id="histIni"></label><label>Data final<input type="date" id="histFim"></label><button class="primary" id="histBuscar">Pesquisar</button></div>
+  <div id="histResumo"></div><div id="histTabela"></div></section>`;
+  async function buscar(){
+    const qs=new URLSearchParams();if($("#histVeiculo").value)qs.set("veiculo_id",$("#histVeiculo").value);if($("#histIni").value)qs.set("data_inicial",$("#histIni").value);if($("#histFim").value)qs.set("data_final",$("#histFim").value);
+    const rows=await api("/api/ordens-finalizadas?"+qs.toString());
+    const total=rows.reduce((n,x)=>n+Number(x.valor_total||x.valor||0),0);
+    $("#histResumo").innerHTML=`<div class="cards v32-summary">${card("O.S. concluídas",rows.length,"✅")}${card("Valor dos serviços",total.toLocaleString("pt-BR",{style:"currency",currency:"BRL"}),"💰")}</div>`;
+    $("#histTabela").innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>O.S.</th><th>Veículo</th><th>Serviço</th><th>Empresa</th><th>Valor</th><th>Finalizada em</th></tr></thead><tbody>${rows.map(o=>`<tr><td>${escapeHtml(o.numero||String(o.id))}</td><td><b>${escapeHtml(o.prefixo||"-")}</b><br><small>${escapeHtml(o.placa||"")}</small></td><td>${escapeHtml(o.descricao||o.servico||"-")}</td><td>${escapeHtml(o.empresa||"-")}</td><td>${Number(o.valor_total||o.valor||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td><td>${o.finalizado_em?new Date(o.finalizado_em).toLocaleString("pt-BR"):"-"}</td></tr>`).join("")}</tbody></table></div>`:`<div class="v3-empty">Nenhuma O.S. finalizada para este filtro.</div>`;
+  }
+  $("#histBuscar").onclick=buscar;buscar();
+}

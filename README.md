@@ -87,3 +87,7 @@ Identidade visual COMJOL integrada, sidebar corporativa azul, detalhes laranja, 
 - Não altera a estrutura do PostgreSQL.
 - Sempre que o motorista entra/recarrega o aplicativo, o sistema solicita o veículo que será utilizado.
 - Depois da confirmação, encaminha diretamente ao Checklist Diário.
+
+
+## V3.2 — Finalização e Histórico
+Botões/endpoints para finalizar O.S. e chamados; O.S. concluídas saem do acompanhamento de abertas, permanecem vinculadas ao histórico do veículo e podem ser consultadas na nova aba Ordens Finalizadas por veículo/período. Dashboard possui endpoint de concluídos do dia/mês.

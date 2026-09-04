@@ -80,3 +80,8 @@ body{background:var(--bg)!important;color:var(--text)}
 input,select,textarea{border:1px solid #dbe2ec!important;border-radius:8px!important}thead th{background:#f8fafc!important;color:#617089!important;text-transform:uppercase;font-size:11px!important}
 .mobile-menu-btn{display:none;position:fixed;top:12px;left:12px;z-index:3100;width:42px;height:42px;border:0;border-radius:9px;background:var(--navy);color:#fff;font-size:21px}
 @media(max-width:900px){.mobile-menu-btn{display:block}.sidebar{position:fixed!important;left:-285px!important;top:0!important;bottom:0!important;width:260px!important;z-index:3000!important;transition:left .22s ease!important;overflow-y:auto!important}body.sidebar-open .sidebar{left:0!important}.main{margin-left:0!important;width:100%!important}.topbar{padding-left:64px!important}.brand img{width:145px!important}}
+
+/* V3.2 Histórico de O.S. */
+.v32-title{display:flex;justify-content:space-between;align-items:center}.v32-title h2{margin-bottom:4px}.v32-title p{margin-top:0;color:var(--muted)}
+.v32-filters{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:12px;align-items:end;margin:18px 0}.v32-filters label{display:grid;gap:5px;font-size:12px}.v32-summary{margin:15px 0}
+@media(max-width:700px){.v32-filters{grid-template-columns:1fr}.v32-filters .primary{width:100%}}

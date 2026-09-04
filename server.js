@@ -16,6 +16,14 @@ const pool = new Pool({
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
+
+async function migrarFinalizacaoOS(){
+  await pool.query(`ALTER TABLE ordens_servico ADD COLUMN IF NOT EXISTS finalizado_em TIMESTAMP`);
+  await pool.query(`ALTER TABLE ordens_servico ADD COLUMN IF NOT EXISTS finalizado_por INTEGER`);
+  await pool.query(`ALTER TABLE chamados ADD COLUMN IF NOT EXISTS finalizado_em TIMESTAMP`);
+  await pool.query(`ALTER TABLE chamados ADD COLUMN IF NOT EXISTS finalizado_por INTEGER`);
+}
+
 async function initDatabase() {
   const sql = `
     CREATE TABLE IF NOT EXISTS usuarios (
@@ -2893,6 +2901,52 @@ app.get("/api/motorista/contexto-dia",auth,somenteMotorista,async(req,res)=>{
     FROM motorista_veiculo_dia m JOIN veiculos v ON v.id=m.veiculo_id
     WHERE m.usuario_id=$1 AND m.data_operacao=CURRENT_DATE`,[req.user.id]);
   res.json(r.rows[0]||null);
+});
+
+
+// ======================================================
+// V3.2 - FINALIZAÇÃO E HISTÓRICO DE O.S. / CHAMADOS
+// ======================================================
+app.put("/api/ordens-servico/:id/finalizar",auth,async(req,res)=>{
+  if(String(req.user.perfil||"").toLowerCase()==="motorista")
+    return res.status(403).json({erro:"Apenas supervisão/administração pode finalizar O.S."});
+  const id=Number(req.params.id);
+  const r=await pool.query(`UPDATE ordens_servico SET status='Concluída',finalizado_em=NOW(),finalizado_por=$2
+    WHERE id=$1 AND COALESCE(status,'') NOT IN ('Concluída','Concluida','Cancelada','Cancelado') RETURNING *`,[id,req.user.id]);
+  if(!r.rowCount)return res.status(404).json({erro:"O.S. não encontrada ou já finalizada."});
+  res.json({ok:true,ordem:r.rows[0]});
+});
+
+app.put("/api/chamados/:id/finalizar",auth,async(req,res)=>{
+  if(String(req.user.perfil||"").toLowerCase()==="motorista")
+    return res.status(403).json({erro:"Apenas supervisão/administração pode finalizar chamado."});
+  const id=Number(req.params.id);
+  const r=await pool.query(`UPDATE chamados SET status='Concluído',finalizado_em=NOW(),finalizado_por=$2
+    WHERE id=$1 AND COALESCE(status,'') NOT IN ('Concluído','Concluida','Concluída','Cancelado','Cancelada') RETURNING *`,[id,req.user.id]);
+  if(!r.rowCount)return res.status(404).json({erro:"Chamado não encontrado ou já finalizado."});
+  res.json({ok:true,chamado:r.rows[0]});
+});
+
+app.get("/api/ordens-finalizadas",auth,async(req,res)=>{
+  const {veiculo_id,data_inicial,data_final}=req.query;
+  const args=[]; const wh=["o.status IN ('Concluída','Concluida')"];
+  if(veiculo_id){args.push(Number(veiculo_id));wh.push(`o.veiculo_id=$${args.length}`)}
+  if(data_inicial){args.push(data_inicial);wh.push(`COALESCE(o.finalizado_em,o.criado_em)::date >= $${args.length}::date`)}
+  if(data_final){args.push(data_final);wh.push(`COALESCE(o.finalizado_em,o.criado_em)::date <= $${args.length}::date`)}
+  const q=`SELECT o.*,v.prefixo,v.placa,v.modelo FROM ordens_servico o
+    LEFT JOIN veiculos v ON v.id=o.veiculo_id WHERE ${wh.join(" AND ")}
+    ORDER BY COALESCE(o.finalizado_em,o.criado_em) DESC`;
+  const r=await pool.query(q,args); res.json(r.rows);
+});
+
+app.get("/api/dashboard/concluidos",auth,async(req,res)=>{
+  const r=await pool.query(`SELECT COUNT(*) FILTER(WHERE status IN ('Concluída','Concluida') AND COALESCE(finalizado_em,criado_em)::date=CURRENT_DATE)::int os_hoje,
+    COUNT(*) FILTER(WHERE status IN ('Concluída','Concluida') AND COALESCE(finalizado_em,criado_em)>=date_trunc('month',CURRENT_DATE))::int os_mes
+    FROM ordens_servico`);
+  const ult=await pool.query(`SELECT o.id,o.numero,o.descricao,o.finalizado_em,v.prefixo FROM ordens_servico o
+    LEFT JOIN veiculos v ON v.id=o.veiculo_id WHERE o.status IN ('Concluída','Concluida')
+    ORDER BY COALESCE(o.finalizado_em,o.criado_em) DESC LIMIT 5`);
+  res.json({...r.rows[0],ultimas:ult.rows});
 });
 
 app.get("/api/:recurso", auth, async (req,res,next) => {
