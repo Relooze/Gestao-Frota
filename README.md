@@ -16,3 +16,17 @@ Histórico específico atualizado a partir de 5041.xlsx:
 - Total histórico: R$ 131,148.97.
 - Dados preservados por lançamento: data, serviço, descrição, sistema, local, NF, produto, valor, fornecedor e empresa.
 - Histórico importado anterior da 5041 é substituído; lançamentos manuais são preservados.
+
+
+## V2.5 — Checklist diário + usuários
+Checklist baseado no arquivo fornecido pelo usuário, com 18 itens obrigatórios.
+Fluxo:
+Motorista -> Checklist diário -> envio -> Tratamento de Manutenção Diária -> Supervisor -> O.S. -> execução/acompanhamento.
+
+Perfis:
+- motorista
+- supervisor
+- admin
+
+Itens RUIM e CRITICO são destacados e podem virar uma O.S. com um clique.
+O motorista pode ter um veículo padrão associado ao usuário.

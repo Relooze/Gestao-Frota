@@ -40,6 +40,9 @@ $("#nav").onclick=e=>{
   else if(b.dataset.page==="ordens-servico") loadOrdensServico();
   else if(b.dataset.page==="manutencao-caminhoes") loadManutencaoCategoria("CAMINHAO");
   else if(b.dataset.page==="manutencao-empilhadeiras") loadManutencaoCategoria("EMPILHADEIRA");
+  else if(b.dataset.page==="checklist-diario") loadChecklistDiario();
+  else if(b.dataset.page==="checklist-tratamento") loadTratamentoChecklist();
+  else if(b.dataset.page==="usuarios") loadUsuarios();
   else loadList(b.dataset.page,b.textContent.trim());
 };
 
@@ -517,6 +520,83 @@ function modalNovaManutencao(){
   <div class="actions"><button type="button" class="secondary" id="cancelMan">Cancelar</button><button class="primary">💾 Salvar manutenção</button></div></form></div>`);
   $("#xMan").onclick=$("#cancelMan").onclick=()=>$("#modalMan").remove();
   $("#formMan").onsubmit=async e=>{e.preventDefault();try{await api("/api/manutencoes",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});$("#modalMan").remove();await loadManutencao()}catch(x){alert(x.message)}};
+}
+
+
+const CHECK_ITENS=["Nível de óleo","Nível da água","Estado de conservação dos pneus","Existência de vazamentos","Luz de pisca, luz de ré, luz alta e luz baixa","Balão de ar","Embreagem","Palhetas do para-brisa","Para-brisa livre de trincos ou rachaduras","Cinto de segurança","Documentação válida","Espelhos retrovisores","Faixas refletivas","Buzina","Lameira de plástico","Triângulo, macaco, cinta, lona e corda","Revisão visual das placas (quebrada, segura, legível)","Tacógrafo"];
+
+async function loadChecklistDiario(){
+  $("#pageTitle").textContent="Checklist Diário";
+  const [cfg,vs]=await Promise.all([api("/api/checklist-diario/config"),api("/api/veiculos")]);
+  const u=cfg.usuario||{};
+  $("#content").innerHTML=`<section class="panel">
+    <div class="os-head"><div><h2>☑ Checklist diário do motorista</h2><p>Preenchimento obrigatório antes da saída do veículo.</p></div>
+    <div><b>${new Date().toLocaleDateString("pt-BR")}</b></div></div>
+    ${cfg.checklist_hoje?`<div class="check-sent">✅ Você já enviou um checklist hoje. Situação: <b>${escapeHtml(cfg.checklist_hoje.status_tratamento)}</b></div>`:""}
+    <form id="dailyCheck">
+      <div class="check-meta"><label>Motorista<input value="${escapeHtml(u.nome||"")}" disabled></label>
+      <label>Veículo<select name="veiculo_id" required><option value="">Selecione</option>${vs.map(v=>`<option value="${v.id}" ${String(v.id)===String(u.veiculo_id)?"selected":""}>${escapeHtml(v.prefixo)} • ${escapeHtml(v.placa||"-")} • ${escapeHtml(v.modelo||"")}</option>`).join("")}</select></label></div>
+      <div class="table-wrap"><table class="daily-table"><thead><tr><th>#</th><th>Item para verificação</th><th>Avaliação obrigatória</th><th>Observação</th></tr></thead>
+      <tbody>${CHECK_ITENS.map((x,i)=>`<tr><td>${i+1}</td><td><b>${escapeHtml(x)}</b></td><td><select class="ck-status" data-i="${i}" required>
+        <option value="">Selecione</option><option>EXCELENTE</option><option>BOM</option><option>REGULAR</option><option>RUIM</option><option>CRITICO</option><option>NA</option>
+      </select></td><td><input class="ck-obs" data-i="${i}" placeholder="Detalhe se houver problema"></td></tr>`).join("")}</tbody></table></div>
+      <label>Observação geral<textarea name="observacao" rows="3"></textarea></label>
+      <div class="check-warning">⚠️ O sistema não permite enviar o checklist sem preencher todos os 18 itens.</div>
+      <div class="actions"><button class="primary">📤 Finalizar e enviar checklist</button></div>
+    </form></section>`;
+  $("#dailyCheck").onsubmit=async e=>{
+    e.preventDefault();
+    const sts=[...document.querySelectorAll(".ck-status")];
+    if(sts.some(x=>!x.value)){alert("Preencha todos os 18 itens antes de enviar.");return}
+    const itens=CHECK_ITENS.map((item,i)=>({item,status:sts[i].value,observacao:document.querySelector(`.ck-obs[data-i="${i}"]`).value.trim()}));
+    if(!confirm("Confirma o envio do checklist diário? Após enviado ele seguirá para o supervisor."))return;
+    try{
+      const fd=new FormData(e.target);
+      const r=await api("/api/checklist-diario",{method:"POST",body:JSON.stringify({veiculo_id:Number(fd.get("veiculo_id")),itens,observacao:fd.get("observacao")})});
+      alert(r.possui_critico?"Checklist enviado. Foram identificados itens que exigem tratamento do supervisor.":"Checklist enviado com sucesso.");
+      loadChecklistDiario();
+    }catch(x){alert(x.message)}
+  };
+}
+
+async function loadTratamentoChecklist(){
+  $("#pageTitle").textContent="Tratamento de Manutenção Diária";
+  try{
+    const rows=await api("/api/checklist-tratamento");
+    const pend=rows.filter(x=>x.status_tratamento==="Pendente");
+    $("#content").innerHTML=`<div class="cards manut-kpis">${card("Recebidos hoje",rows.filter(x=>String(x.data_checklist).slice(0,10)===new Date().toISOString().slice(0,10)).length,"📥")}
+      ${card("Pendentes",pend.length,"⚠️")}${card("Com alerta",rows.filter(x=>x.possui_critico).length,"🚨")}${card("O.S. geradas",rows.filter(x=>x.ordem_servico_id).length,"📋")}</div>
+      <section class="panel" style="margin-top:16px"><h3>🩺 Checklists recebidos dos motoristas</h3>
+      <div class="table-wrap"><table><thead><tr><th>Data</th><th>Veículo</th><th>Motorista</th><th>Alertas</th><th>Situação</th><th>O.S.</th><th>Ação</th></tr></thead>
+      <tbody>${rows.map(x=>{const probs=(x.itens||[]).filter(i=>["RUIM","CRITICO"].includes(i.status));return `<tr class="${probs.length?"check-problem":""}">
+        <td>${formatarDataBR(x.data_checklist)}</td><td><b>${escapeHtml(x.prefixo)}</b><br>${escapeHtml(x.placa||"")}</td><td>${escapeHtml(x.motorista||"-")}</td>
+        <td>${probs.length?`<b>🚨 ${probs.length}</b><br>${probs.map(p=>`${escapeHtml(p.item)} (${p.status})`).join("<br>")}`:"✅ Sem pendência"}</td>
+        <td><select data-ckstatus="${x.id}">${["Pendente","Em análise","Sem pendência","Tratado","O.S. gerada"].map(st=>`<option ${x.status_tratamento===st?"selected":""} ${st==="O.S. gerada"?"disabled":""}>${st}</option>`).join("")}</select></td>
+        <td>${x.ordem_servico_id?`<button class="secondary" data-open-os="${x.ordem_servico_id}">Abrir O.S.</button>`:"-"}</td>
+        <td>${probs.length&&!x.ordem_servico_id?`<button class="primary" data-genck="${x.id}">📋 Gerar O.S.</button>`:""}</td></tr>`}).join("")}</tbody></table></div></section>`;
+    document.querySelectorAll("[data-ckstatus]").forEach(el=>el.onchange=async()=>{try{await api(`/api/checklist-tratamento/${el.dataset.ckstatus}/status`,{method:"PUT",body:JSON.stringify({status:el.value})})}catch(e){alert(e.message)}});
+    document.querySelectorAll("[data-genck]").forEach(b=>b.onclick=async()=>{if(!confirm("Gerar Ordem de Serviço com todos os itens RUIM/CRÍTICO deste checklist?"))return;try{const r=await api(`/api/checklist-tratamento/${b.dataset.genck}/gerar-os`,{method:"POST",body:"{}"});alert(`${r.numero} gerada com sucesso.`);loadTratamentoChecklist()}catch(e){alert(e.message)}});
+    document.querySelectorAll("[data-open-os]").forEach(b=>b.onclick=()=>abrirOS(b.dataset.openOs));
+  }catch(e){$("#content").innerHTML=`<section class="panel"><h3>Acesso restrito</h3><p>${escapeHtml(e.message)}</p></section>`}
+}
+
+async function loadUsuarios(){
+  $("#pageTitle").textContent="Usuários";
+  try{
+    const [rows,vs]=await Promise.all([api("/api/usuarios"),api("/api/veiculos")]);
+    $("#content").innerHTML=`<section class="panel"><div class="os-head"><div><h3>👤 Usuários e perfis de acesso</h3><p>Motorista: checklist diário. Supervisor: tratamento e O.S. Admin: acesso completo.</p></div><button class="primary" id="novoUser">+ Novo usuário</button></div>
+    <div class="table-wrap"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Veículo padrão</th><th>Status</th></tr></thead><tbody>${rows.map(u=>`<tr><td><b>${escapeHtml(u.nome)}</b></td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.perfil)}</td><td>${escapeHtml(u.veiculo_prefixo||"-")}</td><td>${u.ativo?"Ativo":"Inativo"}</td></tr>`).join("")}</tbody></table></div></section>`;
+    $("#novoUser").onclick=()=>modalUsuario(vs);
+  }catch(e){$("#content").innerHTML=`<section class="panel"><h3>Acesso restrito</h3><p>${escapeHtml(e.message)}</p></section>`}
+}
+function modalUsuario(vs){
+ document.body.insertAdjacentHTML("beforeend",`<div class="modal-bg" id="modalUser"><form class="modal" id="formUser"><div class="tire-modal-head"><h2>👤 Novo usuário</h2><button type="button" class="secondary" id="xUser">✕</button></div>
+ <div class="modal-grid"><label>Nome<input name="nome" required></label><label>E-mail<input name="email" type="email" required></label><label>Senha inicial<input name="senha" type="password" minlength="6" required></label>
+ <label>Perfil<select name="perfil" required><option value="motorista">Motorista</option><option value="supervisor">Supervisor</option><option value="admin">Administrador</option></select></label>
+ <label>Veículo padrão<select name="veiculo_id"><option value="">Sem veículo fixo</option>${vs.map(v=>`<option value="${v.id}">${escapeHtml(v.prefixo)} • ${escapeHtml(v.placa||"-")}</option>`).join("")}</select></label></div>
+ <div class="actions"><button type="button" class="secondary" id="cancelUser">Cancelar</button><button class="primary">Criar usuário</button></div></form></div>`);
+ $("#xUser").onclick=$("#cancelUser").onclick=()=>$("#modalUser").remove();
+ $("#formUser").onsubmit=async e=>{e.preventDefault();const o=Object.fromEntries(new FormData(e.target));if(!o.veiculo_id)o.veiculo_id=null;try{await api("/api/usuarios",{method:"POST",body:JSON.stringify(o)});$("#modalUser").remove();loadUsuarios()}catch(x){alert(x.message)}};
 }
 
 

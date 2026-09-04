@@ -175,6 +175,9 @@ async function initDatabase() {
       criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+
+    ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS veiculo_id INTEGER REFERENCES veiculos(id) ON DELETE SET NULL;
+
     CREATE TABLE IF NOT EXISTS checklists (
       id SERIAL PRIMARY KEY,
       veiculo_id INTEGER REFERENCES veiculos(id) ON DELETE CASCADE,
@@ -186,6 +189,16 @@ async function initDatabase() {
     );
   `;
   await pool.query(sql);
+
+  await pool.query(`
+    ALTER TABLE checklists ADD COLUMN IF NOT EXISTS usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL;
+    ALTER TABLE checklists ADD COLUMN IF NOT EXISTS data_checklist DATE DEFAULT CURRENT_DATE;
+    ALTER TABLE checklists ADD COLUMN IF NOT EXISTS status_tratamento VARCHAR(30) DEFAULT 'Pendente';
+    ALTER TABLE checklists ADD COLUMN IF NOT EXISTS tratado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL;
+    ALTER TABLE checklists ADD COLUMN IF NOT EXISTS tratado_em TIMESTAMPTZ;
+    ALTER TABLE checklists ADD COLUMN IF NOT EXISTS ordem_servico_id INTEGER;
+  `);
+
 }
 
 
@@ -2516,6 +2529,122 @@ app.get("/api/manutencao/ativos/:categoria", auth, async (req,res) => {
     res.json(r.rows);
   }catch(e){console.error(e);res.status(500).json({erro:"Erro ao listar ativos."})}
 });
+
+// ======================================================
+// V2.5 - USUÁRIOS + CHECKLIST DIÁRIO + TRATAMENTO
+// ======================================================
+const CHECKLIST_DIARIO_ITENS = [
+ "Nível de óleo","Nível da água","Estado de conservação dos pneus","Existência de vazamentos",
+ "Luz de pisca, luz de ré, luz alta e luz baixa","Balão de ar","Embreagem","Palhetas do para-brisa",
+ "Para-brisa livre de trincos ou rachaduras","Cinto de segurança","Documentação válida","Espelhos retrovisores",
+ "Faixas refletivas","Buzina","Lameira de plástico","Triângulo, macaco, cinta, lona e corda",
+ "Revisão visual das placas (quebrada, segura, legível)","Tacógrafo"
+];
+
+function somenteAdminSupervisor(req,res,next){
+  if(!["admin","supervisor"].includes(String(req.user.perfil||"").toLowerCase()))
+    return res.status(403).json({erro:"Acesso permitido somente para administrador ou supervisor."});
+  next();
+}
+
+app.get("/api/usuarios",auth,somenteAdminSupervisor,async(req,res)=>{
+  const r=await pool.query(`SELECT u.id,u.nome,u.email,u.perfil,u.ativo,u.veiculo_id,v.prefixo veiculo_prefixo,v.placa
+    FROM usuarios u LEFT JOIN veiculos v ON v.id=u.veiculo_id ORDER BY u.nome`);
+  res.json(r.rows);
+});
+
+app.post("/api/usuarios",auth,somenteAdminSupervisor,async(req,res)=>{
+  try{
+    const {nome,email,senha,perfil,veiculo_id}=req.body;
+    if(!nome||!email||!senha||senha.length<6)return res.status(400).json({erro:"Nome, e-mail e senha (mínimo 6 caracteres) são obrigatórios."});
+    if(!["admin","supervisor","motorista"].includes(perfil))return res.status(400).json({erro:"Perfil inválido."});
+    const hash=await bcrypt.hash(senha,12);
+    const r=await pool.query(`INSERT INTO usuarios(nome,email,senha_hash,perfil,veiculo_id)
+      VALUES($1,$2,$3,$4,$5) RETURNING id,nome,email,perfil,ativo,veiculo_id`,
+      [nome.trim(),email.trim().toLowerCase(),hash,perfil,veiculo_id||null]);
+    res.status(201).json(r.rows[0]);
+  }catch(e){res.status(400).json({erro:e.code==="23505"?"E-mail já cadastrado.":e.message})}
+});
+
+app.put("/api/usuarios/:id",auth,somenteAdminSupervisor,async(req,res)=>{
+  const {nome,email,perfil,ativo,veiculo_id,senha}=req.body;
+  if(senha){
+    const hash=await bcrypt.hash(senha,12);
+    await pool.query(`UPDATE usuarios SET nome=$1,email=$2,perfil=$3,ativo=$4,veiculo_id=$5,senha_hash=$6 WHERE id=$7`,
+      [nome,email,perfil,ativo!==false,veiculo_id||null,hash,req.params.id]);
+  }else{
+    await pool.query(`UPDATE usuarios SET nome=$1,email=$2,perfil=$3,ativo=$4,veiculo_id=$5 WHERE id=$6`,
+      [nome,email,perfil,ativo!==false,veiculo_id||null,req.params.id]);
+  }
+  res.json({sucesso:true});
+});
+
+app.get("/api/checklist-diario/config",auth,async(req,res)=>{
+  const u=await pool.query(`SELECT u.id,u.nome,u.perfil,u.veiculo_id,v.prefixo,v.placa,v.modelo,v.tipo
+    FROM usuarios u LEFT JOIN veiculos v ON v.id=u.veiculo_id WHERE u.id=$1`,[req.user.id]);
+  const hoje=await pool.query(`SELECT id,status_tratamento,criado_em FROM checklists WHERE usuario_id=$1 AND data_checklist=CURRENT_DATE ORDER BY id DESC LIMIT 1`,[req.user.id]);
+  res.json({usuario:u.rows[0],itens:CHECKLIST_DIARIO_ITENS,checklist_hoje:hoje.rows[0]||null});
+});
+
+app.post("/api/checklist-diario",auth,async(req,res)=>{
+  try{
+    const {veiculo_id,itens,observacao}=req.body;
+    if(!veiculo_id)return res.status(400).json({erro:"Selecione o veículo."});
+    if(!Array.isArray(itens)||itens.length!==CHECKLIST_DIARIO_ITENS.length)return res.status(400).json({erro:"Todos os 18 itens do checklist são obrigatórios."});
+    for(let i=0;i<CHECKLIST_DIARIO_ITENS.length;i++){
+      if(itens[i].item!==CHECKLIST_DIARIO_ITENS[i]||!["EXCELENTE","BOM","REGULAR","RUIM","CRITICO","NA"].includes(itens[i].status))
+        return res.status(400).json({erro:`Preencha corretamente o item ${i+1}.`});
+    }
+    const ja=await pool.query(`SELECT id FROM checklists WHERE usuario_id=$1 AND veiculo_id=$2 AND data_checklist=CURRENT_DATE`,[req.user.id,veiculo_id]);
+    if(ja.rowCount)return res.status(400).json({erro:"Checklist deste veículo já enviado hoje por este motorista."});
+    const crit=itens.some(x=>["RUIM","CRITICO"].includes(x.status));
+    const r=await pool.query(`INSERT INTO checklists(veiculo_id,usuario_id,itens,possui_critico,observacao,data_checklist,status_tratamento)
+      VALUES($1,$2,$3::jsonb,$4,$5,CURRENT_DATE,$6) RETURNING id`,
+      [veiculo_id,req.user.id,JSON.stringify(itens),crit,observacao||"",crit?"Pendente":"Sem pendência"]);
+    res.status(201).json({sucesso:true,id:r.rows[0].id,possui_critico:crit});
+  }catch(e){console.error(e);res.status(500).json({erro:"Erro ao enviar checklist."})}
+});
+
+app.get("/api/checklist-tratamento",auth,somenteAdminSupervisor,async(req,res)=>{
+  const r=await pool.query(`SELECT c.*,v.prefixo,v.placa,v.modelo,u.nome motorista,
+    ut.nome tratado_por_nome FROM checklists c JOIN veiculos v ON v.id=c.veiculo_id
+    LEFT JOIN usuarios u ON u.id=c.usuario_id LEFT JOIN usuarios ut ON ut.id=c.tratado_por
+    ORDER BY CASE WHEN c.status_tratamento='Pendente' THEN 0 ELSE 1 END,c.data_checklist DESC,c.id DESC`);
+  res.json(r.rows);
+});
+
+app.post("/api/checklist-tratamento/:id/gerar-os",auth,somenteAdminSupervisor,async(req,res)=>{
+  const c=await pool.connect();
+  try{
+    await c.query("BEGIN");
+    const ch=await c.query(`SELECT ck.*,v.prefixo FROM checklists ck JOIN veiculos v ON v.id=ck.veiculo_id WHERE ck.id=$1 FOR UPDATE`,[req.params.id]);
+    if(!ch.rowCount){await c.query("ROLLBACK");return res.status(404).json({erro:"Checklist não encontrado."});}
+    if(ch.rows[0].ordem_servico_id){await c.query("ROLLBACK");return res.status(400).json({erro:"Este checklist já possui Ordem de Serviço."});}
+    const problemas=(ch.rows[0].itens||[]).filter(x=>["RUIM","CRITICO"].includes(x.status));
+    if(!problemas.length){await c.query("ROLLBACK");return res.status(400).json({erro:"Checklist sem itens RUIM ou CRÍTICO."});}
+    const os=await c.query(`INSERT INTO ordens_servico(numero,veiculo_id,status,observacao) VALUES(NULL,$1,'Conferência',$2) RETURNING id`,
+      [ch.rows[0].veiculo_id,`O.S. gerada pelo checklist diário #${req.params.id}.`]);
+    const oid=os.rows[0].id, numero=`OS-${String(oid).padStart(6,"0")}`;
+    await c.query("UPDATE ordens_servico SET numero=$1 WHERE id=$2",[numero,oid]);
+    for(const p of problemas){
+      await c.query(`INSERT INTO ordem_servico_itens(ordem_id,origem,origem_id,descricao,prioridade)
+        VALUES($1,'Checklist',$2,$3,$4)`,
+        [oid,Number(req.params.id),`${p.item}${p.observacao?` • ${p.observacao}`:""}`,p.status==="CRITICO"?"Crítica":"Alta"]);
+    }
+    await c.query(`UPDATE checklists SET status_tratamento='O.S. gerada',tratado_por=$1,tratado_em=NOW(),ordem_servico_id=$2 WHERE id=$3`,
+      [req.user.id,oid,req.params.id]);
+    await c.query("COMMIT");res.json({sucesso:true,id:oid,numero});
+  }catch(e){await c.query("ROLLBACK");console.error(e);res.status(500).json({erro:"Erro ao gerar O.S. do checklist."})}finally{c.release()}
+});
+
+app.put("/api/checklist-tratamento/:id/status",auth,somenteAdminSupervisor,async(req,res)=>{
+  const st=req.body.status;
+  if(!["Pendente","Em análise","Sem pendência","Tratado"].includes(st))return res.status(400).json({erro:"Status inválido."});
+  await pool.query(`UPDATE checklists SET status_tratamento=$1,tratado_por=$2,tratado_em=CASE WHEN $1 IN ('Sem pendência','Tratado') THEN NOW() ELSE tratado_em END WHERE id=$3`,
+    [st,req.user.id,req.params.id]);
+  res.json({sucesso:true});
+});
+
 app.get("/api/:recurso", auth, async (req,res,next) => {
   const allowed = ["colaboradores","expedicoes","pneus","manutencoes","abastecimentos","ocorrencias","checklists"];
   if (!allowed.includes(req.params.recurso)) return next();
