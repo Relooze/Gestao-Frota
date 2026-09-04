@@ -122,13 +122,109 @@ function tabelaPneus(rows){
     <th>Código</th><th>Posição</th><th>Marca</th><th>Modelo</th><th>Sulco mm</th><th>Status</th><th>Ação</th>
   </tr></thead><tbody>${rows.map(p=>{
     const s=String(p.status||"Bom");
-    const crit=/crít|crit/i.test(s), rec=/recap/i.test(s), ate=/aten/i.test(s);
+    const c=String(p.classificacao||"");
+    const crit=/crít|crit/i.test(s+" "+c), rec=/recap/i.test(s+" "+c), ate=/aten/i.test(s+" "+c);
     const acao=crit?"🔴 TROCA IMEDIATA":rec?"🟠 PROGRAMAR RECAPAGEM":ate?"🟡 MONITORAR":"🟢 OK";
-    return `<tr style="${crit?"background:#fee2e2":rec?"background:#fff7ed":""}">
-      <td>${fmt(p.codigo)}</td><td>${fmt(p.posicao)}</td><td>${fmt(p.marca)}</td><td>${fmt(p.modelo)}</td>
+    const dados=encodeURIComponent(JSON.stringify(p));
+    return `<tr onclick="abrirPneu('${dados}')" style="cursor:pointer;${crit?"background:#fee2e2":rec?"background:#fff7ed":""}" title="Clique para visualizar localização e editar">
+      <td><b>${fmt(p.codigo)}</b></td><td>${fmt(p.posicao)}</td><td>${fmt(p.marca)}</td><td>${fmt(p.modelo)}</td>
       <td><b>${fmt(p.sulco_mm)}</b></td><td>${fmt(p.status)}</td><td><b>${acao}</b></td></tr>`;
   }).join("")}</tbody></table></div>`;
 }
+
+window.abrirPneu=function(dados){
+  const p=JSON.parse(decodeURIComponent(dados));
+  const posicao=String(p.posicao||"");
+  document.body.insertAdjacentHTML("beforeend",`
+  <div class="modal-bg" id="modalPneu">
+    <div class="modal tire-modal">
+      <div class="tire-modal-head">
+        <div><h2>🛞 Pneu ${fmt(p.codigo)}</h2><small>${fmt(p.posicao)}</small></div>
+        <button type="button" class="secondary" id="fecharModalPneu">✕</button>
+      </div>
+      <div class="tire-modal-grid">
+        <section class="panel">
+          <h3>🚚 Localização do pneu</h3>
+          ${desenhoCaminhao(posicao)}
+          <div class="tire-location"><b>Posição selecionada</b><br>${fmt(posicao)}</div>
+        </section>
+        <section class="panel">
+          <h3>✏️ Editar informações do pneu</h3>
+          <form id="formEditarPneu">
+            <div class="modal-grid">
+              <label>Código<input name="codigo" value="${escapeHtml(p.codigo||"")}" required></label>
+              <label>Posição<select name="posicao">${opcoesPosicao(p.posicao)}</select></label>
+              <label>Marca<input name="marca" value="${escapeHtml(p.marca||"")}"></label>
+              <label>Modelo<input name="modelo" value="${escapeHtml(p.modelo||"")}"></label>
+              <label>Sulco (mm)<input name="sulco_mm" type="number" step="0.01" min="0" value="${p.sulco_mm??""}"></label>
+              <label>KM do pneu<input name="km_pneu" type="number" step="0.1" min="0" value="${p.km_pneu??0}"></label>
+              <label>Nº de recapagens<input name="recapagens" type="number" min="0" value="${p.recapagens??0}"></label>
+              <label>Custo (R$)<input name="custo" type="number" step="0.01" min="0" value="${p.custo??0}"></label>
+              <label>Status<select name="status">${["Bom","Atenção","Recapagem","Crítico"].map(x=>`<option value="${x}" ${x===p.status?"selected":""}>${x}</option>`).join("")}</select></label>
+              <label>Classificação<input name="classificacao" value="${escapeHtml(p.classificacao||"")}"></label>
+            </div>
+            <label>Ação sugerida<input name="acao_sugerida" value="${escapeHtml(p.acao_sugerida||"")}"></label>
+            <label>Última inspeção<input name="ultima_inspecao" type="date" value="${formatarDataInput(p.ultima_inspecao)}"></label>
+            <label>Observação<textarea name="observacao" rows="4">${escapeHtml(p.observacao||"")}</textarea></label>
+            <div class="actions">
+              <button type="button" class="secondary" id="cancelarPneu">Cancelar</button>
+              <button class="primary" type="submit">💾 Salvar alterações</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </div>
+  </div>`);
+  $("#fecharModalPneu").onclick=()=>$("#modalPneu").remove();
+  $("#cancelarPneu").onclick=()=>$("#modalPneu").remove();
+  $("#formEditarPneu").onsubmit=async e=>{
+    e.preventDefault();
+    const o=Object.fromEntries(new FormData(e.target));
+    try{
+      await api(`/api/pneus/${p.id}`,{method:"PUT",body:JSON.stringify(o)});
+      alert("Pneu atualizado com sucesso!");
+      $("#modalPneu").remove();
+      const prefixo=$("#pneuPrefixo")?.value;
+      if(prefixo) await pesquisarPneus(prefixo); else await listarTodosPneus();
+    }catch(x){alert(x.message)}
+  };
+};
+
+function desenhoCaminhao(posicao){
+  const txt=String(posicao||"").toLowerCase();
+  const eixo=(txt.includes("3º")||txt.includes("3°"))?3:(txt.includes("2º")||txt.includes("2°"))?2:1;
+  const esquerda=txt.includes("esq");
+  const interna=txt.includes("int");
+  const step=txt.includes("step")||txt.includes("estepe");
+  if(step)return `<div class="spare-view"><div>🛞</div><h3>Estepe</h3><p>Pneu reserva do veículo</p></div>`;
+  function pneu(e,lado,interno=false){
+    const selecionado=eixo===e && esquerda===(lado==="E") && interna===interno;
+    return `<div class="truck-tire ${selecionado?"selected":""}" title="${selecionado?escapeHtml(posicao):"Pneu"}"></div>`;
+  }
+  function conjunto(e,lado){
+    return `<div class="tire-set">${e===1?pneu(e,lado,false):pneu(e,lado,true)+pneu(e,lado,false)}</div>`;
+  }
+  return `<div class="truck-map">
+    <div class="truck-front-label">FRENTE</div>
+    <div class="truck-cab">🚚</div>
+    ${[1,2,3].map(e=>`<div class="axle-block"><div class="axle-label">${e}º EIXO</div><div class="axle-row">${conjunto(e,"E")}<div class="axle-line"></div>${conjunto(e,"D")}</div></div>`).join("")}
+    <div class="truck-side-labels"><span>← ESQUERDO</span><span>DIREITO →</span></div>
+    <div class="selected-note">🔴 <b>Pneu selecionado</b><br>${fmt(posicao)}</div>
+  </div>`;
+}
+
+function opcoesPosicao(atual){
+  const posicoes=[
+    "1º Eixo Esq. Ext","1º Eixo Esq. Int","1º Eixo Dir. Int","1º Eixo Dir. Ext",
+    "2º Eixo Esq. Ext","2º Eixo Esq. Int","2º Eixo Dir. Int","2º Eixo Dir. Ext",
+    "3º Eixo Esq. Ext","3º Eixo Esq. Int","3º Eixo Dir. Int","3º Eixo Dir. Ext",
+    "Step 1","Step 2"
+  ];
+  if(atual&&!posicoes.includes(atual))posicoes.unshift(atual);
+  return posicoes.map(x=>`<option value="${escapeHtml(x)}" ${x===atual?"selected":""}>${escapeHtml(x)}</option>`).join("");
+}
+function escapeHtml(v){return String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;")}
+function formatarDataInput(v){return v?String(v).slice(0,10):""}
 
 async function loadList(resource,title){
   $("#pageTitle").textContent=labels[resource]||title;

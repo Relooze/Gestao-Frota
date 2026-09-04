@@ -1,18 +1,19 @@
-# Gestão de Frota & Expedição — V1
+# Gestão de Frota & Expedição — V2
 
-Base funcional para Railway + PostgreSQL.
+Pacote completo para Railway + PostgreSQL.
 
-## Incluído
-- Primeiro acesso / administrador
-- Login JWT
-- Dashboard
-- Cadastro e listagem de veículos
-- Estrutura PostgreSQL para equipe, expedições, pneus, manutenção, checklist, combustível e ocorrências
-- Interface responsiva
+## V2 inclui
+- Pesquisa de pneus por prefixo do veículo
+- Resumo: bons, atenção, recapagem e críticos
+- Alertas de pneus no Dashboard
+- Clique no pneu para visualizar a posição no caminhão
+- Edição de dados do pneu com gravação no PostgreSQL
+- Cadastro, edição e exclusão de veículos
+- Base de frota e pneus já preparada no server.js
 
 ## Railway
-Variáveis necessárias no serviço da aplicação:
-- `DATABASE_URL` = referência `${{Postgres.DATABASE_URL}}`
-- `JWT_SECRET` = uma chave longa e aleatória criada por você
+Variáveis:
+- DATABASE_URL
+- JWT_SECRET
 
-O servidor usa `process.env.PORT` automaticamente.
+Start: `npm start`

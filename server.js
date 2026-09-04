@@ -2117,7 +2117,9 @@ app.delete("/api/veiculos/:id", auth, async (req, res) => {
 });
 
 
-// CONSULTA DE PNEUS POR VEÍCULO + ALERTAS DO DASHBOARD
+// ======================================================
+// PNEUS - CONSULTA POR VEÍCULO E ALERTAS
+// ======================================================
 app.get("/api/pneus/veiculo/:prefixo", auth, async (req, res) => {
   try {
     const prefixo = String(req.params.prefixo || "").trim();
@@ -2128,16 +2130,18 @@ app.get("/api/pneus/veiculo/:prefixo", auth, async (req, res) => {
     if (!v.rowCount) return res.status(404).json({ erro: "Veículo não encontrado." });
 
     const p = await pool.query(
-      `SELECT id,codigo,posicao,marca,modelo,sulco_mm,km_pneu,recapagens,custo,status
+      `SELECT id,codigo,veiculo_id,posicao,marca,modelo,sulco_mm,km_pneu,recapagens,custo,status,
+              classificacao,acao_sugerida,ultima_inspecao,observacao
        FROM pneus WHERE veiculo_id=$1 ORDER BY id`, [v.rows[0].id]
     );
 
     const resumo = { total:p.rowCount, bons:0, atencao:0, recapagem:0, criticos:0 };
     for (const pneu of p.rows) {
       const s = String(pneu.status || "").toLowerCase();
-      if (s.includes("crít") || s.includes("crit")) resumo.criticos++;
-      else if (s.includes("recap")) resumo.recapagem++;
-      else if (s.includes("aten")) resumo.atencao++;
+      const c = String(pneu.classificacao || "").toLowerCase();
+      if (s.includes("crít") || s.includes("crit") || c.includes("crít") || c.includes("crit")) resumo.criticos++;
+      else if (s.includes("recap") || c.includes("recap")) resumo.recapagem++;
+      else if (s.includes("aten") || c.includes("aten")) resumo.atencao++;
       else resumo.bons++;
     }
     res.json({ veiculo:v.rows[0], resumo, pneus:p.rows });
@@ -2152,22 +2156,79 @@ app.get("/api/pneus-alertas", auth, async (req, res) => {
     const r = await pool.query(`
       SELECT v.id, v.prefixo, v.placa, v.tipo, v.modelo,
         COUNT(p.id)::int AS total_pneus,
-        COUNT(p.id) FILTER (WHERE LOWER(p.status) LIKE '%recap%')::int AS recapagem,
-        COUNT(p.id) FILTER (WHERE LOWER(p.status) LIKE '%crít%' OR LOWER(p.status) LIKE '%crit%')::int AS criticos
+        COUNT(p.id) FILTER (WHERE LOWER(COALESCE(p.status,'')) LIKE '%recap%' OR LOWER(COALESCE(p.classificacao,'')) LIKE '%recap%')::int AS recapagem,
+        COUNT(p.id) FILTER (WHERE LOWER(COALESCE(p.status,'')) LIKE '%crít%' OR LOWER(COALESCE(p.status,'')) LIKE '%crit%'
+          OR LOWER(COALESCE(p.classificacao,'')) LIKE '%crít%' OR LOWER(COALESCE(p.classificacao,'')) LIKE '%crit%')::int AS criticos
       FROM veiculos v
       JOIN pneus p ON p.veiculo_id=v.id
       GROUP BY v.id,v.prefixo,v.placa,v.tipo,v.modelo
-      HAVING COUNT(p.id) FILTER (WHERE LOWER(p.status) LIKE '%recap%'
-          OR LOWER(p.status) LIKE '%crít%' OR LOWER(p.status) LIKE '%crit%') > 0
-      ORDER BY
-        COUNT(p.id) FILTER (WHERE LOWER(p.status) LIKE '%crít%' OR LOWER(p.status) LIKE '%crit%') DESC,
-        COUNT(p.id) FILTER (WHERE LOWER(p.status) LIKE '%recap%') DESC,
-        v.prefixo
+      HAVING COUNT(p.id) FILTER (
+        WHERE LOWER(COALESCE(p.status,'')) LIKE '%recap%'
+           OR LOWER(COALESCE(p.classificacao,'')) LIKE '%recap%'
+           OR LOWER(COALESCE(p.status,'')) LIKE '%crít%'
+           OR LOWER(COALESCE(p.status,'')) LIKE '%crit%'
+           OR LOWER(COALESCE(p.classificacao,'')) LIKE '%crít%'
+           OR LOWER(COALESCE(p.classificacao,'')) LIKE '%crit%'
+      ) > 0
+      ORDER BY criticos DESC, recapagem DESC, v.prefixo
     `);
     res.json(r.rows);
   } catch (e) {
     console.error("Erro alertas pneus:", e);
     res.status(500).json({ erro:"Erro ao carregar alertas de pneus." });
+  }
+});
+
+
+// ======================================================
+// PNEUS - EDITAR DADOS
+// ======================================================
+app.put("/api/pneus/:id", auth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ erro: "ID do pneu inválido." });
+    }
+
+    const {
+      codigo, posicao, marca, modelo, sulco_mm, km_pneu, recapagens, custo,
+      status, classificacao, acao_sugerida, ultima_inspecao, observacao
+    } = req.body;
+
+    if (!codigo || !String(codigo).trim()) {
+      return res.status(400).json({ erro: "O código do pneu é obrigatório." });
+    }
+
+    const r = await pool.query(`
+      UPDATE pneus SET
+        codigo=$1, posicao=$2, marca=$3, modelo=$4, sulco_mm=$5,
+        km_pneu=$6, recapagens=$7, custo=$8, status=$9,
+        classificacao=$10, acao_sugerida=$11, ultima_inspecao=$12, observacao=$13
+      WHERE id=$14
+      RETURNING *
+    `, [
+      String(codigo).trim(),
+      posicao || null,
+      marca || null,
+      modelo || null,
+      sulco_mm === "" || sulco_mm == null ? null : Number(sulco_mm),
+      Number(km_pneu || 0),
+      Number(recapagens || 0),
+      Number(custo || 0),
+      status || "Bom",
+      classificacao || null,
+      acao_sugerida || null,
+      ultima_inspecao || null,
+      observacao || null,
+      id
+    ]);
+
+    if (!r.rowCount) return res.status(404).json({ erro: "Pneu não encontrado." });
+    res.json({ sucesso:true, pneu:r.rows[0] });
+  } catch (e) {
+    console.error("Erro ao editar pneu:", e);
+    if (e.code === "23505") return res.status(400).json({ erro:"Já existe outro pneu com este código." });
+    res.status(500).json({ erro:"Não foi possível atualizar o pneu." });
   }
 });
 

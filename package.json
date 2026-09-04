@@ -1,7 +1,7 @@
 {
   "name": "gestao-frota",
-  "version": "1.0.0",
-  "description": "Sistema de Gestão de Frota e Expedição",
+  "version": "2.0.0",
+  "description": "Sistema de Gestão de Frota e Expedição - V2",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
