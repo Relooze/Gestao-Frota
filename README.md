@@ -8,3 +8,11 @@ Atualizada com HISTORICO DA FROTA V3.xlsx.
 - Histórico mostra serviço, sistema, produto/descrição, empresa, NF, local e valor.
 - Importações antigas de planilha são substituídas para evitar duplicidade; lançamentos manuais são preservados.
 Não apague o PostgreSQL.
+
+
+## V2.4.1 — Carreta 5041
+Histórico específico atualizado a partir de 5041.xlsx:
+- 144 lançamentos.
+- Total histórico: R$ 131,148.97.
+- Dados preservados por lançamento: data, serviço, descrição, sistema, local, NF, produto, valor, fornecedor e empresa.
+- Histórico importado anterior da 5041 é substituído; lançamentos manuais são preservados.
