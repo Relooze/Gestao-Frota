@@ -67,3 +67,12 @@ As O.S. exibidas ao motorista são vinculadas ao veículo selecionado para o dia
 - Dashboard do motorista mostra somente o veículo selecionado no dia.
 - Alertas: checklist pendente, pneus em atenção, recapagem, críticos, chamados e O.S. abertas.
 - Ao selecionar o veículo do dia, motorista é enviado diretamente ao Checklist Diário.
+
+
+## V2.9 — Checklist Mobile
+- Checklist redesenhado para celular.
+- Motorista toca no item; abre uma janela para selecionar status, inserir observação e salvar.
+- Progresso mostra quantos itens já foram preenchidos.
+- Envio fica bloqueado até todos os itens serem avaliados.
+- Removidos: Palhetas do para-brisa, Cinto de segurança e Lameira de plástico.
+- Checklist passou de 18 para 15 itens obrigatórios.

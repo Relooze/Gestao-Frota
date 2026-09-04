@@ -585,38 +585,75 @@ function modalNovaManutencao(){
 }
 
 
-const CHECK_ITENS=["Nível de óleo","Nível da água","Estado de conservação dos pneus","Existência de vazamentos","Luz de pisca, luz de ré, luz alta e luz baixa","Balão de ar","Embreagem","Palhetas do para-brisa","Para-brisa livre de trincos ou rachaduras","Cinto de segurança","Documentação válida","Espelhos retrovisores","Faixas refletivas","Buzina","Lameira de plástico","Triângulo, macaco, cinta, lona e corda","Revisão visual das placas (quebrada, segura, legível)","Tacógrafo"];
+const CHECK_ITENS=["Nível de óleo","Nível da água","Estado de conservação dos pneus","Existência de vazamentos","Luz de pisca, luz de ré, luz alta e luz baixa","Balão de ar","Embreagem","Para-brisa livre de trincos ou rachaduras","Documentação válida","Espelhos retrovisores","Faixas refletivas","Buzina","Triângulo, macaco, cinta, lona e corda","Revisão visual das placas (quebrada, segura, legível)","Tacógrafo"];
 
 async function loadChecklistDiario(){
   $("#pageTitle").textContent="Checklist Diário";
   const [cfg,vs]=await Promise.all([api("/api/checklist-diario/config"),api("/api/veiculos")]);
   const u=cfg.usuario||{};
-  $("#content").innerHTML=`<section class="panel">
-    <div class="os-head"><div><h2>☑ Checklist diário do motorista</h2><p>Preenchimento obrigatório antes da saída do veículo.</p></div>
-    <div><b>${new Date().toLocaleDateString("pt-BR")}</b></div></div>
-    ${cfg.checklist_hoje?`<div class="check-sent">✅ Você já enviou um checklist hoje. Situação: <b>${escapeHtml(cfg.checklist_hoje.status_tratamento)}</b></div>`:""}
-    <form id="dailyCheck">
-      <div class="check-meta"><label>Motorista<input value="${escapeHtml(u.nome||"")}" disabled></label>
-      <label>Veículo<select name="veiculo_id" required><option value="">Selecione</option>${vs.map(v=>`<option value="${v.id}" ${String(v.id)===String(u.veiculo_id)?"selected":""}>${escapeHtml(v.prefixo)} • ${escapeHtml(v.placa||"-")} • ${escapeHtml(v.modelo||"")}</option>`).join("")}</select></label></div>
-      <div class="table-wrap"><table class="daily-table"><thead><tr><th>#</th><th>Item para verificação</th><th>Avaliação obrigatória</th><th>Observação</th></tr></thead>
-      <tbody>${CHECK_ITENS.map((x,i)=>`<tr><td>${i+1}</td><td><b>${escapeHtml(x)}</b></td><td><select class="ck-status" data-i="${i}" required>
-        <option value="">Selecione</option><option>EXCELENTE</option><option>BOM</option><option>REGULAR</option><option>RUIM</option><option>CRITICO</option><option>NA</option>
-      </select></td><td><input class="ck-obs" data-i="${i}" placeholder="Detalhe se houver problema"></td></tr>`).join("")}</tbody></table></div>
-      <label>Observação geral<textarea name="observacao" rows="3"></textarea></label>
-      <div class="check-warning">⚠️ O sistema não permite enviar o checklist sem preencher todos os 18 itens.</div>
-      <div class="actions"><button class="primary">📤 Finalizar e enviar checklist</button></div>
-    </form></section>`;
-  $("#dailyCheck").onsubmit=async e=>{
-    e.preventDefault();
-    const sts=[...document.querySelectorAll(".ck-status")];
-    if(sts.some(x=>!x.value)){alert("Preencha todos os 18 itens antes de enviar.");return}
-    const itens=CHECK_ITENS.map((item,i)=>({item,status:sts[i].value,observacao:document.querySelector(`.ck-obs[data-i="${i}"]`).value.trim()}));
-    if(!confirm("Confirma o envio do checklist diário? Após enviado ele seguirá para o supervisor."))return;
+  const itensSalvos=Array(CHECK_ITENS.length).fill(null);
+
+  $("#content").innerHTML=`<section class="panel checklist-mobile-panel">
+    <div class="check-top"><div><h2>☑ Checklist do veículo</h2><p>Toque em cada item para avaliar.</p></div><div class="check-progress"><b id="ckDone">0</b>/${CHECK_ITENS.length}<small> preenchidos</small></div></div>
+    ${cfg.checklist_hoje?`<div class="check-sent">✅ Checklist de hoje já enviado. Situação: <b>${escapeHtml(cfg.checklist_hoje.status_tratamento)}</b></div>`:""}
+    <div class="check-meta"><label>Motorista<input value="${escapeHtml(u.nome||"")}" disabled></label>
+      <label>Veículo<select id="ckVehicle" required><option value="">Selecione</option>${vs.map(v=>`<option value="${v.id}" ${String(v.id)===String(u.veiculo_id)?"selected":""}>${escapeHtml(v.prefixo)} • ${escapeHtml(v.placa||"-")} • ${escapeHtml(v.modelo||"")}</option>`).join("")}</select></label>
+    </div>
+    <div class="check-item-list">${CHECK_ITENS.map((item,i)=>`<button type="button" class="check-item-card" data-check-item="${i}">
+      <span class="check-number">${i+1}</span><span class="check-name">${escapeHtml(item)}</span><span class="check-result" id="ckResult${i}">Toque para avaliar ›</span>
+    </button>`).join("")}</div>
+    <label class="check-general">Observação geral<textarea id="ckGeneral" rows="3" placeholder="Observação geral do veículo (opcional)"></textarea></label>
+    <div class="check-warning">⚠️ Avalie todos os ${CHECK_ITENS.length} itens antes de enviar.</div>
+    <button class="primary check-submit" id="sendDailyCheck" disabled>📤 Finalizar e enviar checklist</button>
+  </section>`;
+
+  function atualizarProgresso(){
+    const n=itensSalvos.filter(Boolean).length;
+    $("#ckDone").textContent=n;
+    $("#sendDailyCheck").disabled=n!==CHECK_ITENS.length;
+  }
+  function abrirItem(i){
+    const old=itensSalvos[i]||{status:"",observacao:""};
+    document.body.insertAdjacentHTML("beforeend",`<div class="modal-bg check-modal-bg" id="checkItemModal">
+      <div class="modal check-item-modal">
+        <div class="tire-modal-head"><div><small>ITEM ${i+1} DE ${CHECK_ITENS.length}</small><h2>${escapeHtml(CHECK_ITENS[i])}</h2></div><button type="button" class="secondary" id="closeCheckItem">✕</button></div>
+        <p class="check-question">Qual é a condição deste item?</p>
+        <div class="status-choice">
+          ${[["EXCELENTE","🟢","Excelente"],["BOM","🟢","Bom"],["REGULAR","🟡","Regular"],["RUIM","🟠","Ruim"],["CRITICO","🔴","Crítico"],["NA","⚪","Não se aplica"]].map(x=>`<button type="button" class="status-option ${old.status===x[0]?"selected":""}" data-status="${x[0]}"><span>${x[1]}</span><b>${x[2]}</b></button>`).join("")}
+        </div>
+        <label>Observação<textarea id="checkItemObs" rows="4" placeholder="Descreva qualquer anormalidade ou detalhe...">${escapeHtml(old.observacao||"")}</textarea></label>
+        <button type="button" class="primary save-check-item" id="saveCheckItem" ${old.status?"":"disabled"}>✓ Salvar item</button>
+      </div></div>`);
+    let escolhido=old.status;
+    document.querySelectorAll(".status-option").forEach(b=>b.onclick=()=>{
+      escolhido=b.dataset.status;
+      document.querySelectorAll(".status-option").forEach(x=>x.classList.toggle("selected",x===b));
+      $("#saveCheckItem").disabled=false;
+    });
+    $("#closeCheckItem").onclick=()=>$("#checkItemModal").remove();
+    $("#saveCheckItem").onclick=()=>{
+      if(!escolhido)return;
+      itensSalvos[i]={item:CHECK_ITENS[i],status:escolhido,observacao:$("#checkItemObs").value.trim()};
+      const card=document.querySelector(`[data-check-item="${i}"]`);
+      const result=$("#ckResult"+i);
+      const map={EXCELENTE:"🟢 Excelente",BOM:"🟢 Bom",REGULAR:"🟡 Regular",RUIM:"🟠 Ruim",CRITICO:"🔴 Crítico",NA:"⚪ N/A"};
+      result.textContent=map[escolhido];
+      card.classList.add("completed");
+      card.dataset.status=escolhido;
+      $("#checkItemModal").remove();
+      atualizarProgresso();
+    };
+  }
+  document.querySelectorAll("[data-check-item]").forEach(b=>b.onclick=()=>abrirItem(Number(b.dataset.checkItem)));
+  $("#sendDailyCheck").onclick=async()=>{
+    if(itensSalvos.some(x=>!x))return alert(`Avalie todos os ${CHECK_ITENS.length} itens.`);
+    const veiculo_id=Number($("#ckVehicle").value);
+    if(!veiculo_id)return alert("Selecione o veículo.");
+    if(!confirm("Confirma o envio do checklist diário?"))return;
     try{
-      const fd=new FormData(e.target);
-      const r=await api("/api/checklist-diario",{method:"POST",body:JSON.stringify({veiculo_id:Number(fd.get("veiculo_id")),itens,observacao:fd.get("observacao")})});
-      alert(r.possui_critico?"Checklist enviado. Foram identificados itens que exigem tratamento do supervisor.":"Checklist enviado com sucesso.");
-      loadChecklistDiario();
+      const r=await api("/api/checklist-diario",{method:"POST",body:JSON.stringify({veiculo_id,itens:itensSalvos,observacao:$("#ckGeneral").value.trim()})});
+      alert(r.possui_critico?"Checklist enviado. Existem itens que exigem atenção do supervisor.":"Checklist enviado com sucesso.");
+      loadDashboardMotorista();
     }catch(x){alert(x.message)}
   };
 }

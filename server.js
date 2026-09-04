@@ -2646,9 +2646,9 @@ app.post("/api/primeiro-acesso/alterar-senha",auth,async(req,res)=>{
 // ======================================================
 const CHECKLIST_DIARIO_ITENS = [
  "Nível de óleo","Nível da água","Estado de conservação dos pneus","Existência de vazamentos",
- "Luz de pisca, luz de ré, luz alta e luz baixa","Balão de ar","Embreagem","Palhetas do para-brisa",
- "Para-brisa livre de trincos ou rachaduras","Cinto de segurança","Documentação válida","Espelhos retrovisores",
- "Faixas refletivas","Buzina","Lameira de plástico","Triângulo, macaco, cinta, lona e corda",
+ "Luz de pisca, luz de ré, luz alta e luz baixa","Balão de ar","Embreagem",
+ "Para-brisa livre de trincos ou rachaduras","Documentação válida","Espelhos retrovisores",
+ "Faixas refletivas","Buzina","Triângulo, macaco, cinta, lona e corda",
  "Revisão visual das placas (quebrada, segura, legível)","Tacógrafo"
 ];
 

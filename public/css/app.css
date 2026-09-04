@@ -40,3 +40,27 @@ body.perfil-motorista #nav button[hidden]{display:none!important}
 .driver-alert.attention{background:#fefce8;border-color:#fde047}.driver-alert.os{background:#eff6ff;border-color:#93c5fd}
 .driver-alert.ok{background:#ecfdf5;border-color:#86efac}.driver-actions{display:flex;gap:10px;flex-wrap:wrap}
 @media(max-width:800px){.driver-vehicle{align-items:flex-start;flex-direction:column}.driver-cards{grid-template-columns:1fr 1fr}}
+
+/* V2.9 Checklist mobile intuitivo */
+.check-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}
+.check-progress{min-width:95px;text-align:center;background:#eff6ff;border-radius:14px;padding:10px 12px;font-size:20px}
+.check-progress small{display:block;font-size:11px;font-weight:400}
+.check-item-list{display:grid;gap:9px;margin:14px 0}
+.check-item-card{width:100%;display:grid;grid-template-columns:44px 1fr auto;align-items:center;gap:12px;text-align:left;background:#fff;border:1px solid #dbe4ee;border-radius:14px;padding:15px;cursor:pointer;color:#10233d}
+.check-item-card.completed{border-color:#93c5fd;background:#f8fbff}
+.check-number{width:36px;height:36px;display:grid;place-items:center;border-radius:50%;background:#edf2f7;font-weight:800}
+.check-name{font-size:16px;font-weight:800}
+.check-result{font-size:13px;color:#64748b;font-weight:700}
+.check-item-card.completed .check-result{color:#0f4c81}
+.check-question{font-size:16px;font-weight:700;margin:16px 0 10px}
+.status-choice{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:16px}
+.status-option{min-height:62px;border:2px solid #dbe4ee;background:white;border-radius:13px;display:flex;gap:9px;align-items:center;justify-content:flex-start;padding:12px;font-size:15px}
+.status-option span{font-size:20px}.status-option.selected{border-color:#1976d2;background:#eff6ff}
+.save-check-item{width:100%;margin-top:14px;min-height:48px}.check-submit{width:100%;min-height:50px;margin-top:12px}
+.check-submit:disabled{opacity:.45;cursor:not-allowed}.check-general{display:grid;gap:6px;margin-top:15px}
+@media(max-width:700px){
+ .checklist-mobile-panel{padding:14px}.check-top h2{font-size:20px}.check-meta{grid-template-columns:1fr}
+ .check-item-card{grid-template-columns:38px 1fr;padding:14px 10px}.check-result{grid-column:2;display:block}
+ .check-name{font-size:17px}.check-number{width:32px;height:32px}.check-item-modal{width:calc(100vw - 24px);max-height:90vh;overflow:auto;padding:18px}
+ .status-choice{grid-template-columns:1fr 1fr}.status-option{min-height:58px}
+}
