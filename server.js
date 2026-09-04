@@ -102,6 +102,41 @@ async function initDatabase() {
       criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+
+    CREATE TABLE IF NOT EXISTS ordens_servico (
+      id SERIAL PRIMARY KEY,
+      numero VARCHAR(30) UNIQUE,
+      veiculo_id INTEGER REFERENCES veiculos(id) ON DELETE CASCADE,
+      data_abertura DATE NOT NULL DEFAULT CURRENT_DATE,
+      status VARCHAR(30) NOT NULL DEFAULT 'Conferência',
+      observacao TEXT,
+      valor_orcado NUMERIC(12,2) DEFAULT 0,
+      aprovado_por VARCHAR(120),
+      data_aprovacao TIMESTAMPTZ,
+      data_conclusao TIMESTAMPTZ,
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS ordem_servico_itens (
+      id SERIAL PRIMARY KEY,
+      ordem_id INTEGER NOT NULL REFERENCES ordens_servico(id) ON DELETE CASCADE,
+      origem VARCHAR(30) NOT NULL,
+      origem_id INTEGER,
+      descricao TEXT NOT NULL,
+      prioridade VARCHAR(20) NOT NULL DEFAULT 'Atenção',
+      valor_estimado NUMERIC(12,2) DEFAULT 0,
+      status VARCHAR(30) NOT NULL DEFAULT 'Pendente',
+      observacao TEXT,
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS sistema_config (
+      chave VARCHAR(80) PRIMARY KEY,
+      valor TEXT,
+      atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS abastecimentos (
       id SERIAL PRIMARY KEY,
       veiculo_id INTEGER REFERENCES veiculos(id) ON DELETE CASCADE,
@@ -2186,50 +2221,184 @@ app.get("/api/pneus-alertas", auth, async (req, res) => {
 app.put("/api/pneus/:id", auth, async (req, res) => {
   try {
     const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({ erro: "ID do pneu inválido." });
-    }
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ erro:"ID do pneu inválido." });
 
-    const {
-      codigo, posicao, marca, modelo, sulco_mm, km_pneu, recapagens, custo,
-      status, classificacao, acao_sugerida, ultima_inspecao, observacao
-    } = req.body;
+    const { codigo,posicao,marca,modelo,sulco_mm,km_pneu,recapagens,custo,ultima_inspecao,observacao } = req.body;
+    if (!codigo || !String(codigo).trim()) return res.status(400).json({ erro:"O código do pneu é obrigatório." });
 
-    if (!codigo || !String(codigo).trim()) {
-      return res.status(400).json({ erro: "O código do pneu é obrigatório." });
+    const sulco = sulco_mm === "" || sulco_mm == null ? null : Number(sulco_mm);
+    let status = "Bom", classificacao = "BOM", acao_sugerida = "Manter acompanhamento normal";
+
+    // Parâmetro operacional V2.1:
+    // >= 7 mm Bom | 5 a 6,99 Atenção | 1 a 4,99 Recapagem | <= 0 Crítico
+    if (sulco !== null) {
+      if (sulco <= 0) {
+        status = "Crítico"; classificacao = "CRÍTICO"; acao_sugerida = "Parar e providenciar troca imediata";
+      } else if (sulco < 5) {
+        status = "Recapagem"; classificacao = "RECAPAGEM"; acao_sugerida = "Programar retirada, conferência e orçamento";
+      } else if (sulco < 7) {
+        status = "Atenção"; classificacao = "ATENÇÃO"; acao_sugerida = "Monitorar sulco e programar nova inspeção";
+      }
     }
 
     const r = await pool.query(`
-      UPDATE pneus SET
-        codigo=$1, posicao=$2, marca=$3, modelo=$4, sulco_mm=$5,
-        km_pneu=$6, recapagens=$7, custo=$8, status=$9,
-        classificacao=$10, acao_sugerida=$11, ultima_inspecao=$12, observacao=$13
-      WHERE id=$14
-      RETURNING *
+      UPDATE pneus SET codigo=$1,posicao=$2,marca=$3,modelo=$4,sulco_mm=$5,km_pneu=$6,
+        recapagens=$7,custo=$8,status=$9,classificacao=$10,acao_sugerida=$11,
+        ultima_inspecao=$12,observacao=$13
+      WHERE id=$14 RETURNING *
     `, [
-      String(codigo).trim(),
-      posicao || null,
-      marca || null,
-      modelo || null,
-      sulco_mm === "" || sulco_mm == null ? null : Number(sulco_mm),
-      Number(km_pneu || 0),
-      Number(recapagens || 0),
-      Number(custo || 0),
-      status || "Bom",
-      classificacao || null,
-      acao_sugerida || null,
-      ultima_inspecao || null,
-      observacao || null,
-      id
+      String(codigo).trim(),posicao||null,marca||null,modelo||null,sulco,
+      Number(km_pneu||0),Number(recapagens||0),Number(custo||0),
+      status,classificacao,acao_sugerida,ultima_inspecao||null,observacao||null,id
     ]);
 
-    if (!r.rowCount) return res.status(404).json({ erro: "Pneu não encontrado." });
-    res.json({ sucesso:true, pneu:r.rows[0] });
-  } catch (e) {
-    console.error("Erro ao editar pneu:", e);
-    if (e.code === "23505") return res.status(400).json({ erro:"Já existe outro pneu com este código." });
+    if (!r.rowCount) return res.status(404).json({ erro:"Pneu não encontrado." });
+    res.json({ sucesso:true, pneu:r.rows[0], classificacao_automatica:{status,classificacao,acao_sugerida} });
+  } catch(e) {
+    console.error("Erro ao editar pneu:",e);
+    if (e.code==="23505") return res.status(400).json({ erro:"Já existe outro pneu com este código." });
     res.status(500).json({ erro:"Não foi possível atualizar o pneu." });
   }
+});
+
+
+// ======================================================
+// ORDEM DE SERVIÇO - CONFERÊNCIA, ORÇAMENTO, APROVAÇÃO E CONCLUSÃO
+// ======================================================
+app.get("/api/veiculos/:prefixo/demandas", auth, async (req,res) => {
+  try {
+    const v = await pool.query("SELECT * FROM veiculos WHERE prefixo=$1 LIMIT 1",[String(req.params.prefixo).trim()]);
+    if (!v.rowCount) return res.status(404).json({erro:"Veículo não encontrado."});
+    const id=v.rows[0].id;
+
+    const pneus=await pool.query(`
+      SELECT id,codigo,posicao,marca,sulco_mm,status,classificacao,acao_sugerida
+      FROM pneus WHERE veiculo_id=$1
+        AND (status IN ('Atenção','Recapagem','Crítico') OR classificacao ILIKE '%ATEN%')
+      ORDER BY CASE status WHEN 'Crítico' THEN 1 WHEN 'Recapagem' THEN 2 ELSE 3 END, id
+    `,[id]);
+    const manut=await pool.query(`
+      SELECT id,tipo,descricao,vencimento,custo,status FROM manutencoes
+      WHERE veiculo_id=$1 AND LOWER(status) NOT IN ('concluída','concluida','finalizada','fechada')
+      ORDER BY id DESC
+    `,[id]);
+    const ocorr=await pool.query(`
+      SELECT id,tipo,descricao,status FROM ocorrencias
+      WHERE veiculo_id=$1 AND LOWER(status) NOT IN ('concluída','concluida','finalizada','fechada')
+      ORDER BY id DESC
+    `,[id]);
+
+    res.json({veiculo:v.rows[0],pneus:pneus.rows,manutencoes:manut.rows,ocorrencias:ocorr.rows,
+      total:pneus.rowCount+manut.rowCount+ocorr.rowCount});
+  } catch(e){console.error(e);res.status(500).json({erro:"Erro ao carregar demandas."});}
+});
+
+app.post("/api/ordens-servico/veiculo/:prefixo", auth, async (req,res) => {
+  const client=await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const v=await client.query("SELECT * FROM veiculos WHERE prefixo=$1 LIMIT 1",[String(req.params.prefixo).trim()]);
+    if(!v.rowCount){await client.query("ROLLBACK");return res.status(404).json({erro:"Veículo não encontrado."});}
+    const vid=v.rows[0].id;
+
+    const pneus=await client.query(`
+      SELECT id,codigo,posicao,sulco_mm,status,acao_sugerida FROM pneus
+      WHERE veiculo_id=$1 AND status IN ('Atenção','Recapagem','Crítico')
+      ORDER BY id
+    `,[vid]);
+    const manut=await client.query(`
+      SELECT id,tipo,descricao,custo FROM manutencoes WHERE veiculo_id=$1
+      AND LOWER(status) NOT IN ('concluída','concluida','finalizada','fechada') ORDER BY id
+    `,[vid]);
+    const ocorr=await client.query(`
+      SELECT id,tipo,descricao FROM ocorrencias WHERE veiculo_id=$1
+      AND LOWER(status) NOT IN ('concluída','concluida','finalizada','fechada') ORDER BY id
+    `,[vid]);
+
+    if(!pneus.rowCount&&!manut.rowCount&&!ocorr.rowCount){
+      await client.query("ROLLBACK");return res.status(400).json({erro:"Este veículo não possui demandas abertas para gerar O.S."});
+    }
+
+    const os=await client.query(`
+      INSERT INTO ordens_servico(numero,veiculo_id,status,observacao)
+      VALUES(NULL,$1,'Conferência',$2) RETURNING *
+    `,[vid,req.body?.observacao||"Ordem gerada a partir das demandas abertas do veículo."]);
+    const oid=os.rows[0].id;
+    const numero=`OS-${String(oid).padStart(6,"0")}`;
+    await client.query("UPDATE ordens_servico SET numero=$1 WHERE id=$2",[numero,oid]);
+
+    for(const p of pneus.rows){
+      const prioridade=p.status==="Crítico"?"Crítica":p.status==="Recapagem"?"Alta":"Atenção";
+      await client.query(`INSERT INTO ordem_servico_itens(ordem_id,origem,origem_id,descricao,prioridade)
+        VALUES($1,'Pneu',$2,$3,$4)`,[oid,p.id,`Pneu ${p.codigo} • ${p.posicao} • Sulco ${p.sulco_mm} mm • ${p.acao_sugerida||p.status}`,prioridade]);
+    }
+    for(const x of manut.rows){
+      await client.query(`INSERT INTO ordem_servico_itens(ordem_id,origem,origem_id,descricao,prioridade,valor_estimado)
+        VALUES($1,'Manutenção',$2,$3,'Atenção',$4)`,[oid,x.id,`${x.tipo}: ${x.descricao}`,Number(x.custo||0)]);
+    }
+    for(const x of ocorr.rows){
+      await client.query(`INSERT INTO ordem_servico_itens(ordem_id,origem,origem_id,descricao,prioridade)
+        VALUES($1,'Ocorrência',$2,$3,'Atenção')`,[oid,x.id,`${x.tipo}: ${x.descricao}`]);
+    }
+    await client.query("COMMIT");
+    res.json({sucesso:true,id:oid,numero});
+  } catch(e){await client.query("ROLLBACK");console.error(e);res.status(500).json({erro:"Erro ao gerar ordem de serviço."});}
+  finally{client.release();}
+});
+
+app.get("/api/ordens-servico/veiculo/:prefixo", auth, async (req,res) => {
+  try {
+    const r=await pool.query(`
+      SELECT os.*,v.prefixo,v.placa FROM ordens_servico os JOIN veiculos v ON v.id=os.veiculo_id
+      WHERE v.prefixo=$1 ORDER BY os.id DESC
+    `,[String(req.params.prefixo).trim()]);
+    res.json(r.rows);
+  }catch(e){res.status(500).json({erro:"Erro ao listar ordens de serviço."});}
+});
+
+app.get("/api/ordens-servico/:id", auth, async (req,res) => {
+  try {
+    const os=await pool.query(`SELECT os.*,v.prefixo,v.placa,v.tipo,v.modelo FROM ordens_servico os
+      JOIN veiculos v ON v.id=os.veiculo_id WHERE os.id=$1`,[req.params.id]);
+    if(!os.rowCount)return res.status(404).json({erro:"O.S. não encontrada."});
+    const itens=await pool.query("SELECT * FROM ordem_servico_itens WHERE ordem_id=$1 ORDER BY id",[req.params.id]);
+    res.json({ordem:os.rows[0],itens:itens.rows});
+  }catch(e){res.status(500).json({erro:"Erro ao abrir ordem de serviço."});}
+});
+
+app.put("/api/ordens-servico/:id", auth, async (req,res) => {
+  try {
+    const {status,valor_orcado,observacao,aprovado_por}=req.body;
+    const atual=await pool.query("SELECT * FROM ordens_servico WHERE id=$1",[req.params.id]);
+    if(!atual.rowCount)return res.status(404).json({erro:"O.S. não encontrada."});
+    const novoStatus=status||atual.rows[0].status;
+    const aprovacao=novoStatus==="Aprovada" ? "NOW()" : "data_aprovacao";
+    const conclusao=novoStatus==="Concluída" ? "NOW()" : "data_conclusao";
+    const r=await pool.query(`
+      UPDATE ordens_servico SET status=$1,valor_orcado=$2,observacao=$3,aprovado_por=$4,
+        data_aprovacao=${aprovacao},data_conclusao=${conclusao},atualizado_em=NOW()
+      WHERE id=$5 RETURNING *
+    `,[novoStatus,Number(valor_orcado??atual.rows[0].valor_orcado??0),observacao??atual.rows[0].observacao,
+       aprovado_por??atual.rows[0].aprovado_por,req.params.id]);
+    if(novoStatus==="Concluída"){
+      await pool.query("UPDATE ordem_servico_itens SET status='Concluído' WHERE ordem_id=$1",[req.params.id]);
+    }
+    res.json({sucesso:true,ordem:r.rows[0]});
+  }catch(e){console.error(e);res.status(500).json({erro:"Erro ao atualizar O.S."});}
+});
+
+app.put("/api/ordens-servico-itens/:id", auth, async (req,res) => {
+  try{
+    const {valor_estimado,status,observacao}=req.body;
+    const r=await pool.query(`UPDATE ordem_servico_itens SET
+      valor_estimado=COALESCE($1,valor_estimado),status=COALESCE($2,status),observacao=COALESCE($3,observacao)
+      WHERE id=$4 RETURNING *`,
+      [valor_estimado===""?null:valor_estimado,status||null,observacao||null,req.params.id]);
+    if(!r.rowCount)return res.status(404).json({erro:"Item não encontrado."});
+    const soma=await pool.query(`SELECT COALESCE(SUM(valor_estimado),0) total FROM ordem_servico_itens WHERE ordem_id=$1`,[r.rows[0].ordem_id]);
+    await pool.query("UPDATE ordens_servico SET valor_orcado=$1,atualizado_em=NOW() WHERE id=$2",[soma.rows[0].total,r.rows[0].ordem_id]);
+    res.json({sucesso:true,item:r.rows[0],total:soma.rows[0].total});
+  }catch(e){res.status(500).json({erro:"Erro ao atualizar item da O.S."});}
 });
 
 app.get("/api/:recurso", auth, async (req,res,next) => {
@@ -2243,7 +2412,31 @@ app.use((req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+
+async function importarDadosIniciaisUmaVez() {
+  const ja = await pool.query("SELECT valor FROM sistema_config WHERE chave='carga_inicial_v1'");
+  if (ja.rowCount) {
+    console.log("Carga inicial já registrada; preservando alterações manuais.");
+    return;
+  }
+
+  // Se o banco já possui os dados da frota/pneus, apenas registra a migração.
+  const existentes = await pool.query("SELECT COUNT(*)::int AS total FROM pneus");
+  if (Number(existentes.rows[0].total) > 0) {
+    await pool.query(
+      "INSERT INTO sistema_config(chave,valor) VALUES('carga_inicial_v1','existente') ON CONFLICT (chave) DO NOTHING"
+    );
+    console.log("Banco existente detectado; carga inicial não será reaplicada.");
+    return;
+  }
+
+  await importarDadosIniciais();
+  await pool.query(
+    "INSERT INTO sistema_config(chave,valor) VALUES('carga_inicial_v1','concluida') ON CONFLICT (chave) DO NOTHING"
+  );
+}
+
 initDatabase()
-  .then(importarDadosIniciais)
+  .then(importarDadosIniciaisUmaVez)
   .then(() => app.listen(PORT, "0.0.0.0", () => console.log(`Gestão-Frota online na porta ${PORT}`)))
   .catch(err => { console.error("Falha ao iniciar banco:", err); process.exit(1); });

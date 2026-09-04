@@ -107,7 +107,9 @@ async function pesquisarPneus(prefixo){
         <p><b>Placa:</b> ${fmt(v.placa)} &nbsp; <b>Tipo:</b> ${fmt(v.tipo)} &nbsp; <b>Modelo:</b> ${fmt(v.modelo)}</p>
         <p><b>Capacidade:</b> ${fmt(v.capacidade_kg)} kg &nbsp; <b>KM:</b> ${fmt(v.km_atual)} &nbsp; <b>Status:</b> ${fmt(v.status)}</p>
       </section>
-      ${tabelaPneus(d.pneus)}`;
+      ${tabelaPneus(d.pneus)}
+      <div id="demandasOS" style="margin-top:16px"></div>`;
+    await carregarDemandasOS(v.prefixo);
   }catch(e){box.innerHTML=`<div class="panel"><h3>Veículo não encontrado</h3><p>${fmt(e.message)}</p></div>`}
 }
 
@@ -160,10 +162,11 @@ window.abrirPneu=function(dados){
               <label>KM do pneu<input name="km_pneu" type="number" step="0.1" min="0" value="${p.km_pneu??0}"></label>
               <label>Nº de recapagens<input name="recapagens" type="number" min="0" value="${p.recapagens??0}"></label>
               <label>Custo (R$)<input name="custo" type="number" step="0.01" min="0" value="${p.custo??0}"></label>
-              <label>Status<select name="status">${["Bom","Atenção","Recapagem","Crítico"].map(x=>`<option value="${x}" ${x===p.status?"selected":""}>${x}</option>`).join("")}</select></label>
-              <label>Classificação<input name="classificacao" value="${escapeHtml(p.classificacao||"")}"></label>
+              <label>Status automático<input id="pneuStatusAuto" value="${escapeHtml(p.status||"Bom")}" readonly></label>
+              <label>Classificação automática<input id="pneuClassAuto" value="${escapeHtml(p.classificacao||"BOM")}" readonly></label>
             </div>
-            <label>Ação sugerida<input name="acao_sugerida" value="${escapeHtml(p.acao_sugerida||"")}"></label>
+            <div id="alertaSulco" class="sulco-alert"></div>
+            <label>Ação sugerida<input id="pneuAcaoAuto" value="${escapeHtml(p.acao_sugerida||"")}" readonly></label>
             <label>Última inspeção<input name="ultima_inspecao" type="date" value="${formatarDataInput(p.ultima_inspecao)}"></label>
             <label>Observação<textarea name="observacao" rows="4">${escapeHtml(p.observacao||"")}</textarea></label>
             <div class="actions">
@@ -177,6 +180,22 @@ window.abrirPneu=function(dados){
   </div>`);
   $("#fecharModalPneu").onclick=()=>$("#modalPneu").remove();
   $("#cancelarPneu").onclick=()=>$("#modalPneu").remove();
+  const sulcoInput=$("#formEditarPneu [name='sulco_mm']");
+  const atualizarIndicadorSulco=()=>{
+    const n=Number(String(sulcoInput.value).replace(",","."));
+    let st="Bom",cl="BOM",acao="Manter acompanhamento normal",icone="🟢";
+    if(!Number.isNaN(n)){
+      if(n<=0){st="Crítico";cl="CRÍTICO";acao="Parar e providenciar troca imediata";icone="🔴";}
+      else if(n<5){st="Recapagem";cl="RECAPAGEM";acao="Programar retirada, conferência e orçamento";icone="🟠";}
+      else if(n<7){st="Atenção";cl="ATENÇÃO";acao="Monitorar sulco e programar nova inspeção";icone="🟡";}
+    }
+    $("#pneuStatusAuto").value=st;$("#pneuClassAuto").value=cl;$("#pneuAcaoAuto").value=acao;
+    $("#alertaSulco").innerHTML=`${icone} <b>${st}</b> — ${acao}`;
+    $("#alertaSulco").className=`sulco-alert ${st.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"")}`;
+  };
+  sulcoInput.addEventListener("input",atualizarIndicadorSulco);
+  atualizarIndicadorSulco();
+
   $("#formEditarPneu").onsubmit=async e=>{
     e.preventDefault();
     const o=Object.fromEntries(new FormData(e.target));
@@ -225,6 +244,72 @@ function opcoesPosicao(atual){
 }
 function escapeHtml(v){return String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;")}
 function formatarDataInput(v){return v?String(v).slice(0,10):""}
+
+async function carregarDemandasOS(prefixo){
+  const box=$("#demandasOS"); if(!box)return;
+  try{
+    const [d,ordens]=await Promise.all([
+      api(`/api/veiculos/${encodeURIComponent(prefixo)}/demandas`),
+      api(`/api/ordens-servico/veiculo/${encodeURIComponent(prefixo)}`)
+    ]);
+    const itens=[
+      ...d.pneus.map(x=>`🛞 ${fmt(x.codigo)} • ${fmt(x.posicao)} • ${fmt(x.sulco_mm)} mm • <b>${fmt(x.status)}</b>`),
+      ...d.manutencoes.map(x=>`🛠 ${fmt(x.tipo)} • ${fmt(x.descricao)}`),
+      ...d.ocorrencias.map(x=>`⚠ ${fmt(x.tipo)} • ${fmt(x.descricao)}`)
+    ];
+    box.innerHTML=`<section class="panel os-panel">
+      <div class="os-head"><div><h3>📋 Demandas do veículo / Ordem de Serviço</h3>
+      <p><b>${d.total}</b> demanda(s) aberta(s) para conferência e orçamento.</p></div>
+      <button class="primary" id="gerarOS" ${d.total===0?"disabled":""}>+ Gerar Ordem de Serviço</button></div>
+      ${itens.length?`<div class="demand-list">${itens.map(x=>`<div>${x}</div>`).join("")}</div>`:"<p>✅ Nenhuma demanda aberta para este veículo.</p>"}
+      ${ordens.length?`<h4>Ordens já geradas</h4><div class="os-list">${ordens.map(o=>`
+        <button type="button" class="os-row" data-os="${o.id}">
+          <b>${fmt(o.numero)}</b><span>${fmt(o.status)}</span><span>R$ ${Number(o.valor_orcado||0).toFixed(2).replace(".",",")}</span>
+        </button>`).join("")}</div>`:""}
+    </section>`;
+    const btn=$("#gerarOS");
+    if(btn)btn.onclick=async()=>{
+      if(!confirm(`Gerar uma Ordem de Serviço com as ${d.total} demandas abertas do veículo ${prefixo}?`))return;
+      try{const r=await api(`/api/ordens-servico/veiculo/${encodeURIComponent(prefixo)}`,{method:"POST",body:"{}"});
+        alert(`${r.numero} gerada com sucesso.`);await carregarDemandasOS(prefixo);await abrirOS(r.id);
+      }catch(e){alert(e.message)}
+    };
+    box.querySelectorAll("[data-os]").forEach(b=>b.onclick=()=>abrirOS(b.dataset.os));
+  }catch(e){box.innerHTML=`<section class="panel"><p>Não foi possível carregar as demandas: ${fmt(e.message)}</p></section>`}
+}
+
+async function abrirOS(id){
+  try{
+    const d=await api(`/api/ordens-servico/${id}`),o=d.ordem;
+    document.body.insertAdjacentHTML("beforeend",`<div class="modal-bg" id="modalOS"><div class="modal os-modal">
+      <div class="tire-modal-head"><div><h2>📋 ${fmt(o.numero)}</h2><small>Veículo ${fmt(o.prefixo)} • ${fmt(o.placa)}</small></div>
+      <button class="secondary" type="button" id="fecharOS">✕</button></div>
+      <div class="os-statusbar"><b>Status:</b> ${fmt(o.status)} <b>Valor total:</b> R$ ${Number(o.valor_orcado||0).toFixed(2).replace(".",",")}</div>
+      <p><b>Fluxo:</b> Conferência → Em orçamento → Aguardando aprovação → Aprovada → Em execução → Concluída</p>
+      <div class="table-wrap"><table><thead><tr><th>Origem</th><th>Serviço / Demanda</th><th>Prioridade</th><th>Valor R$</th><th>Status</th></tr></thead>
+      <tbody>${d.itens.map(i=>`<tr><td>${fmt(i.origem)}</td><td class="wrapcell">${fmt(i.descricao)}</td><td>${fmt(i.prioridade)}</td>
+      <td><input class="os-value" data-item="${i.id}" type="number" min="0" step="0.01" value="${Number(i.valor_estimado||0)}"></td>
+      <td><select class="os-item-status" data-item="${i.id}">${["Pendente","Em orçamento","Aprovado","Em execução","Concluído"].map(s=>`<option ${s===i.status?"selected":""}>${s}</option>`).join("")}</select></td></tr>`).join("")}</tbody></table></div>
+      <form id="formOS" style="margin-top:16px">
+        <div class="modal-grid">
+          <label>Status da O.S.<select name="status">${["Conferência","Em orçamento","Aguardando aprovação","Aprovada","Em execução","Concluída"].map(s=>`<option ${s===o.status?"selected":""}>${s}</option>`).join("")}</select></label>
+          <label>Aprovado por<input name="aprovado_por" value="${escapeHtml(o.aprovado_por||"")}" placeholder="Nome do responsável pela aprovação"></label>
+        </div>
+        <label>Observação<textarea name="observacao" rows="3">${escapeHtml(o.observacao||"")}</textarea></label>
+        <div class="actions"><button type="button" class="secondary" id="cancelOS">Fechar</button><button class="primary">💾 Atualizar O.S.</button></div>
+      </form>
+    </div></div>`);
+    $("#fecharOS").onclick=$("#cancelOS").onclick=()=>$("#modalOS").remove();
+    document.querySelectorAll(".os-value").forEach(x=>x.onchange=()=>salvarItemOS(x.dataset.item,{valor_estimado:x.value}));
+    document.querySelectorAll(".os-item-status").forEach(x=>x.onchange=()=>salvarItemOS(x.dataset.item,{status:x.value}));
+    $("#formOS").onsubmit=async e=>{e.preventDefault();const body=Object.fromEntries(new FormData(e.target));
+      try{await api(`/api/ordens-servico/${id}`,{method:"PUT",body:JSON.stringify(body)});alert("Ordem de Serviço atualizada.");
+        $("#modalOS").remove();const prefixo=$("#pneuPrefixo")?.value;if(prefixo)await pesquisarPneus(prefixo);
+      }catch(x){alert(x.message)}};
+  }catch(e){alert(e.message)}
+}
+async function salvarItemOS(id,body){try{await api(`/api/ordens-servico-itens/${id}`,{method:"PUT",body:JSON.stringify(body)});}catch(e){alert(e.message)}}
+
 
 async function loadList(resource,title){
   $("#pageTitle").textContent=labels[resource]||title;
