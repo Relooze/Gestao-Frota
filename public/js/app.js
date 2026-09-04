@@ -16,7 +16,9 @@ async function boot(){
     showApp();
     await checarPrimeiroAcesso();
     await aplicarMenuPorPerfil();
-    if(String(user?.perfil||"").toLowerCase()==="motorista"){ return abrirSelecaoVeiculoDia(); }
+    if(String(user?.perfil||"").toLowerCase()==="motorista"){
+      return abrirSelecaoVeiculoDia();
+    }
     return loadDashboard();
   }
   const s=await api("/api/setup/status");
@@ -36,7 +38,9 @@ $("#loginForm").onsubmit=async e=>{
     token=r.token;user=r.usuario;localStorage.setItem("token",token);localStorage.setItem("user",JSON.stringify(user));showApp();
     await checarPrimeiroAcesso();
     await aplicarMenuPorPerfil();
-    if(String(user?.perfil||"").toLowerCase()==="motorista"){ return abrirSelecaoVeiculoDia(); }
+    if(String(user?.perfil||"").toLowerCase()==="motorista"){
+      return abrirSelecaoVeiculoDia();
+    }
     loadDashboard();
   }catch(x){$("#authMsg").textContent=x.message}
 };
@@ -764,9 +768,7 @@ async function aplicarMenuPorPerfil(){
       b.style.display=(motorista && !permitidasMotorista.includes(b.dataset.page))?"none":"";
     });
     if(motorista){
-      const dia=await api("/api/motorista/veiculo-dia");
-      if(!dia) return abrirSelecaoVeiculoDia();
-      window.__veiculoDia=dia;
+      window.__veiculoDia=null;
     }
   }catch(e){}
 }
@@ -775,9 +777,9 @@ async function abrirSelecaoVeiculoDia(){
   if($("#modalVeiculoDia"))return;
   const vs=await api("/api/veiculos");
   document.body.insertAdjacentHTML("beforeend",`<div class="modal-bg" id="modalVeiculoDia"><form class="modal" id="formVeiculoDia">
-    <h2>🚚 Qual veículo você utilizará hoje?</h2>
+    <h2>🚚 Qual veículo você vai utilizar agora?</h2>
     <p>Antes de iniciar a operação, selecione o veículo. Em seguida você será direcionado para o Checklist Diário.</p>
-    <label>Veículo de hoje<select name="veiculo_id" required><option value="">Selecione o veículo</option>${vs.map(v=>`<option value="${v.id}">${escapeHtml(v.prefixo)} • ${escapeHtml(v.placa||"-")} • ${escapeHtml(v.modelo||"")}</option>`).join("")}</select></label>
+    <label>Veículo que será utilizado<select name="veiculo_id" required><option value="">Selecione o veículo</option>${vs.map(v=>`<option value="${v.id}">${escapeHtml(v.prefixo)} • ${escapeHtml(v.placa||"-")} • ${escapeHtml(v.modelo||"")}</option>`).join("")}</select></label>
     <div class="actions"><button class="primary">Continuar para o Checklist</button></div></form></div>`);
   $("#formVeiculoDia").onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.target);try{
     await api("/api/motorista/veiculo-dia",{method:"POST",body:JSON.stringify({veiculo_id:Number(fd.get("veiculo_id"))})});
