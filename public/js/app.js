@@ -844,10 +844,12 @@ async function loadHistoricoServicos(){
   $("#content").innerHTML=`<section class="panel"><h2>🗂 Histórico de Serviços</h2><p>Banco de consulta de O.S., chamados e manutenções concluídas.</p>
     <div class="v32-filters"><label>Veículo<select id="hsVeiculo"><option value="">Todos</option>${vs.map(v=>`<option value="${v.id}">${escapeHtml(v.prefixo)} • ${escapeHtml(v.placa||"-")}</option>`).join("")}</select></label><label>Tipo<select id="hsTipo"><option value="">Todos</option><option value="OS">O.S.</option><option value="CHAMADO">Chamado</option><option value="MANUTENÇÃO">Manutenção</option></select></label><label>Data inicial<input type="date" id="hsIni"></label><label>Data final<input type="date" id="hsFim"></label><button class="primary" id="hsBuscar">Pesquisar</button></div><div id="hsResumo"></div><div id="hsTabela"></div></section>`;
   async function buscar(){
+    try {
     const q=new URLSearchParams(); if($("#hsVeiculo").value)q.set("veiculo_id",$("#hsVeiculo").value);if($("#hsTipo").value)q.set("tipo",$("#hsTipo").value);if($("#hsIni").value)q.set("data_inicial",$("#hsIni").value);if($("#hsFim").value)q.set("data_final",$("#hsFim").value);
     const rows=await api("/api/historico-servicos?"+q),total=rows.reduce((a,x)=>a+Number(x.valor||0),0),dinheiro=n=>Number(n||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
     $("#hsResumo").innerHTML=`<div class="cards" style="margin-top:16px">${card("Registros concluídos",rows.length,"✅")}${card("Valor registrado",dinheiro(total),"💰")}</div>`;
     $("#hsTabela").innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>Tipo</th><th>Número</th><th>Veículo</th><th>Serviço / ocorrência</th><th>Empresa</th><th>Valor</th><th>Conclusão</th><th>Finalizado por</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${escapeHtml(x.tipo)}</td><td>${escapeHtml(x.numero||String(x.id))}</td><td><b>${escapeHtml(x.prefixo||"-")}</b><br><small>${escapeHtml(x.placa||"")}</small></td><td>${escapeHtml(x.descricao||"-")}</td><td>${escapeHtml(x.empresa||"-")}</td><td>${dinheiro(x.valor)}</td><td>${x.data_evento?new Date(x.data_evento).toLocaleString("pt-BR"):"-"}</td><td>${escapeHtml(x.finalizado_por||"-")}</td></tr>`).join("")}</tbody></table></div>`:`<div class="panel" style="margin-top:16px">Nenhum registro encontrado.</div>`;
+    } catch(e) { $("#hsResumo").innerHTML=""; $("#hsTabela").innerHTML=`<div class="panel" style="margin-top:16px"><b>Erro ao pesquisar histórico:</b> ${escapeHtml(e.message)}</div>`; }
   }
   $("#hsBuscar").onclick=buscar;buscar();
 }
