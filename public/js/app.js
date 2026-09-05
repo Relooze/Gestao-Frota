@@ -179,7 +179,7 @@ function formatarDataBR(v){
 
 
 async function loadPneus(){
-  $("#pageTitle").textContent="Pneus";
+  $("#pageTitle").textContent="Acompanhamento de Pneus";
   $("#content").innerHTML=`
     <section class="panel">
       <h3>🔎 Consultar pneus por veículo</h3>
@@ -405,11 +405,16 @@ async function abrirOS(id){
           <label>Aprovado por<input name="aprovado_por" value="${escapeHtml(o.aprovado_por||"")}" placeholder="Nome do responsável pela aprovação"></label>
         </div>
         <label>Observação<textarea name="observacao" rows="3">${escapeHtml(o.observacao||"")}</textarea></label>
-        <div class="actions"><button type="button" class="secondary" id="imprimirOSAtual">🖨 Imprimir O.S.</button><button type="button" class="secondary" id="cancelOS">Fechar</button><button class="primary">💾 Atualizar O.S.</button></div>
+        <div class="actions"><button type="button" class="secondary" id="imprimirOSAtual">🖨 Imprimir O.S.</button><button type="button" class="btn-success" id="finalizarOSAtual">✅ Finalizar O.S.</button><button type="button" class="secondary" id="cancelOS">Fechar</button><button class="primary">💾 Atualizar O.S.</button></div>
       </form>
     </div></div>`);
     $("#fecharOS").onclick=$("#cancelOS").onclick=()=>$("#modalOS").remove();
     $("#imprimirOSAtual").onclick=()=>imprimirOS(id);
+    $("#finalizarOSAtual").onclick=async()=>{
+      if(!confirm("Finalizar esta Ordem de Serviço? Ela sairá das ordens abertas e será enviada ao histórico do veículo."))return;
+      try{await api(`/api/ordens-servico/${id}/finalizar`,{method:"PUT"});alert("O.S. finalizada e enviada ao histórico do veículo.");$("#modalOS").remove();const prefixo=$("#pneuPrefixo")?.value;if(prefixo)await pesquisarPneus(prefixo);}
+      catch(x){alert(x.message)}
+    };
     document.querySelectorAll(".os-value").forEach(x=>x.onchange=()=>salvarItemOS(x.dataset.item,{valor_estimado:x.value}));
     document.querySelectorAll(".os-item-status").forEach(x=>x.onchange=()=>salvarItemOS(x.dataset.item,{status:x.value}));
     $("#formOS").onsubmit=async e=>{e.preventDefault();const body=Object.fromEntries(new FormData(e.target));

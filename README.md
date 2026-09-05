@@ -91,3 +91,12 @@ Identidade visual COMJOL integrada, sidebar corporativa azul, detalhes laranja, 
 
 ## V3.2 — Finalização e Histórico
 Botões/endpoints para finalizar O.S. e chamados; O.S. concluídas saem do acompanhamento de abertas, permanecem vinculadas ao histórico do veículo e podem ser consultadas na nova aba Ordens Finalizadas por veículo/período. Dashboard possui endpoint de concluídos do dia/mês.
+
+
+## V3.3 — Acompanhamento de Pneus restaurado
+- Consulta de pneus por prefixo do veículo.
+- Resumo automático: Bom, Atenção, Recapagem e Crítico.
+- Clique no pneu abre desenho do caminhão com a posição destacada e formulário de edição.
+- Alteração do sulco recalcula automaticamente classificação, alerta e ação sugerida.
+- Demandas do veículo podem ser agrupadas em uma Ordem de Serviço para conferência e orçamento.
+- O.S. pode ser atualizada pelo fluxo operacional e finalizada; ao finalizar sai das abertas e permanece no histórico.
