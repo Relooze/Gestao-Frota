@@ -2949,6 +2949,84 @@ app.get("/api/dashboard/concluidos",auth,async(req,res)=>{
   res.json({...r.rows[0],ultimas:ult.rows});
 });
 
+
+// ======================================================
+// V3.4 - HISTÓRICO UNIFICADO + DASHBOARD OPERACIONAL
+// ======================================================
+app.get("/api/historico-servicos",auth,async(req,res)=>{
+  if(String(req.user.perfil||"").toLowerCase()==="motorista") return res.status(403).json({erro:"Acesso restrito."});
+  try{
+    const {veiculo_id,data_inicial,data_final,tipo}=req.query;
+    const args=[]; const filtros=[];
+    if(veiculo_id){args.push(Number(veiculo_id));filtros.push(`x.veiculo_id=$${args.length}`)}
+    if(data_inicial){args.push(data_inicial);filtros.push(`x.data_evento::date >= $${args.length}::date`)}
+    if(data_final){args.push(data_final);filtros.push(`x.data_evento::date <= $${args.length}::date`)}
+    if(tipo){args.push(String(tipo).toUpperCase());filtros.push(`x.tipo=$${args.length}`)}
+    const where=filtros.length?`WHERE ${filtros.join(" AND ")}`:"";
+    const q=`SELECT * FROM (
+      SELECT 'OS'::text tipo,o.id,o.numero,o.veiculo_id,v.prefixo,v.placa,
+        COALESCE(NULLIF(o.observacao,''),'Ordem de Serviço concluída') descricao,
+        COALESCE(o.valor_orcado,0)::numeric valor,NULL::text empresa,
+        COALESCE(o.finalizado_em,o.data_conclusao,o.atualizado_em,o.criado_em) data_evento,
+        o.status,u.nome finalizado_por
+      FROM ordens_servico o LEFT JOIN veiculos v ON v.id=o.veiculo_id
+      LEFT JOIN usuarios u ON u.id=o.finalizado_por
+      WHERE LOWER(COALESCE(o.status,'')) IN ('concluída','concluida','finalizada','fechada')
+      UNION ALL
+      SELECT 'CHAMADO'::text,c.id,c.numero,c.veiculo_id,v.prefixo,v.placa,
+        CONCAT_WS(' • ',c.titulo,NULLIF(c.descricao,'')) descricao,0::numeric valor,NULL::text empresa,
+        COALESCE(c.finalizado_em,c.atualizado_em,c.criado_em) data_evento,c.status,u.nome finalizado_por
+      FROM chamados c LEFT JOIN veiculos v ON v.id=c.veiculo_id
+      LEFT JOIN usuarios u ON u.id=c.finalizado_por
+      WHERE LOWER(COALESCE(c.status,'')) IN ('concluído','concluido','concluída','concluida','finalizado','fechado')
+      UNION ALL
+      SELECT 'MANUTENÇÃO'::text,m.id,COALESCE(NULLIF(m.nota_fiscal,''),'MAN-'||m.id::text),m.veiculo_id,v.prefixo,v.placa,
+        COALESCE(NULLIF(m.produto,''),NULLIF(m.descricao,''),NULLIF(m.servico,''),'Manutenção') descricao,
+        COALESCE(m.custo,0)::numeric valor,m.empresa,
+        COALESCE(m.data_emissao,m.data_conclusao,m.data_abertura,m.criado_em::date)::timestamp data_evento,
+        COALESCE(m.status,'Concluída') status,NULL::text finalizado_por
+      FROM manutencoes m LEFT JOIN veiculos v ON v.id=m.veiculo_id
+      WHERE LOWER(COALESCE(m.status,'concluída')) IN ('concluída','concluida','finalizada','fechada')
+    ) x ${where} ORDER BY x.data_evento DESC,x.id DESC LIMIT 1000`;
+    const r=await pool.query(q,args);
+    res.json(r.rows);
+  }catch(e){console.error("historico-servicos",e);res.status(500).json({erro:"Erro ao consultar histórico de serviços."})}
+});
+
+app.get("/api/dashboard-operacional",auth,async(req,res)=>{
+  if(String(req.user.perfil||"").toLowerCase()==="motorista") return res.status(403).json({erro:"Acesso restrito."});
+  try{
+    const [veiculos,gastos,combustivel,resumo]=await Promise.all([
+      pool.query(`SELECT v.id,v.prefixo,v.placa,v.modelo,v.tipo,v.status,
+        CASE WHEN LOWER(COALESCE(v.status,''))='manutenção' THEN 'Manutenção'
+             WHEN EXISTS(SELECT 1 FROM motorista_veiculo_dia md WHERE md.veiculo_id=v.id AND md.data_operacao=CURRENT_DATE) OR LOWER(COALESCE(v.status,''))='em rota' THEN 'Em rota'
+             ELSE 'Parado' END status_operacional,
+        EXISTS(SELECT 1 FROM checklists c WHERE c.veiculo_id=v.id AND c.data_checklist=CURRENT_DATE) checklist_hoje,
+        (SELECT COUNT(*)::int FROM ordens_servico o WHERE o.veiculo_id=v.id AND LOWER(COALESCE(o.status,'')) NOT IN ('concluída','concluida','finalizada','fechada','cancelada','cancelado')) os_abertas,
+        (SELECT COUNT(*)::int FROM chamados c WHERE c.veiculo_id=v.id AND LOWER(COALESCE(c.status,'')) NOT IN ('concluído','concluido','concluída','concluida','finalizado','fechado','cancelado','cancelada')) chamados_abertos
+        FROM veiculos v ORDER BY v.prefixo`),
+      pool.query(`SELECT v.id,v.prefixo,v.placa,ROUND(SUM(COALESCE(m.custo,0))::numeric,2) total
+        FROM manutencoes m JOIN veiculos v ON v.id=m.veiculo_id
+        WHERE COALESCE(m.data_emissao,m.data_conclusao,m.data_abertura,m.criado_em::date)>=date_trunc('month',CURRENT_DATE)::date
+          AND COALESCE(m.data_emissao,m.data_conclusao,m.data_abertura,m.criado_em::date)<(date_trunc('month',CURRENT_DATE)+interval '1 month')::date
+        GROUP BY v.id,v.prefixo,v.placa ORDER BY total DESC LIMIT 10`),
+      pool.query(`SELECT v.id,v.prefixo,v.placa,ROUND(SUM(COALESCE(a.litros,0))::numeric,2) litros,
+        ROUND(SUM(COALESCE(a.valor_total,a.litros*a.valor_litro,0))::numeric,2) valor,COUNT(*)::int abastecimentos
+        FROM abastecimentos a JOIN veiculos v ON v.id=a.veiculo_id
+        WHERE a.data>=date_trunc('month',CURRENT_DATE)::date AND a.data<(date_trunc('month',CURRENT_DATE)+interval '1 month')::date
+        GROUP BY v.id,v.prefixo,v.placa ORDER BY litros DESC LIMIT 10`),
+      pool.query(`SELECT
+        (SELECT COUNT(*)::int FROM veiculos) total,
+        (SELECT COUNT(*)::int FROM veiculos v WHERE EXISTS(SELECT 1 FROM motorista_veiculo_dia md WHERE md.veiculo_id=v.id AND md.data_operacao=CURRENT_DATE) OR LOWER(COALESCE(v.status,''))='em rota') em_rota,
+        (SELECT COUNT(*)::int FROM veiculos v WHERE LOWER(COALESCE(v.status,''))<>'manutenção' AND NOT EXISTS(SELECT 1 FROM motorista_veiculo_dia md WHERE md.veiculo_id=v.id AND md.data_operacao=CURRENT_DATE) AND LOWER(COALESCE(v.status,''))<>'em rota') parados,
+        (SELECT COUNT(DISTINCT veiculo_id)::int FROM checklists WHERE data_checklist=CURRENT_DATE) checklist_feito,
+        (SELECT COUNT(*)::int FROM ordens_servico WHERE LOWER(COALESCE(status,'')) NOT IN ('concluída','concluida','finalizada','fechada','cancelada','cancelado')) os_abertas,
+        (SELECT COUNT(*)::int FROM chamados WHERE LOWER(COALESCE(status,'')) NOT IN ('concluído','concluido','concluída','concluida','finalizado','fechado','cancelado','cancelada')) chamados_abertos`)
+    ]);
+    res.json({resumo:resumo.rows[0],veiculos:veiculos.rows,ranking_gastos:gastos.rows,ranking_combustivel:combustivel.rows});
+  }catch(e){console.error("dashboard-operacional",e);res.status(500).json({erro:"Erro ao carregar dashboard operacional."})}
+});
+
 app.get("/api/:recurso", auth, async (req,res,next) => {
   const allowed = ["colaboradores","expedicoes","pneus","manutencoes","abastecimentos","ocorrencias","checklists"];
   if (!allowed.includes(req.params.recurso)) return next();
@@ -3070,6 +3148,7 @@ async function importarDadosIniciaisUmaVez() {
 }
 
 initDatabase()
+  .then(migrarFinalizacaoOS)
   .then(importarDadosIniciaisUmaVez)
   .then(importarHistoricoManutencaoV23)
   .then(importarHistoricoFrotaV3)

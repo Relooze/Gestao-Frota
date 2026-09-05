@@ -87,3 +87,6 @@ input,select,textarea{border:1px solid #dbe2ec!important;border-radius:8px!impor
 @media(max-width:700px){.v32-filters{grid-template-columns:1fr}.v32-filters .primary{width:100%}}
 
 .btn-success{background:#198754;color:#fff;border:0;border-radius:8px;padding:10px 14px;font-weight:700;cursor:pointer}.btn-success:hover{filter:brightness(.95)}
+
+/* V3.4 dashboard operacional */
+.dash-status{display:inline-block;padding:6px 10px;border-radius:999px;font-weight:700;font-size:12px}.dash-status.rota{background:#dcfce7;color:#166534}.dash-status.parado{background:#f1f5f9;color:#475569}.dash-status.manut{background:#fee2e2;color:#991b1b}

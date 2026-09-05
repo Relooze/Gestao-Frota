@@ -52,6 +52,7 @@ $("#nav").onclick=e=>{
   if(b.dataset.page==="dashboard") String(user?.perfil||"").toLowerCase()==="motorista"?loadDashboardMotorista():loadDashboard();
   else if(b.dataset.page==="pneus") loadPneus();
   else if(b.dataset.page==="ordens-finalizadas") loadOrdensFinalizadas();
+  else if(b.dataset.page==="historico-servicos") loadHistoricoServicos();
     if(b.dataset.page==="ordens-servico") loadOrdensServico();
   else if(b.dataset.page==="manutencao-caminhoes") loadManutencaoCategoria("CAMINHAO");
   else if(b.dataset.page==="manutencao-empilhadeiras") loadManutencaoCategoria("EMPILHADEIRA");
@@ -106,28 +107,18 @@ async function loadDashboardMotorista(){
 }
 
 async function loadDashboard(){
-  $("#pageTitle").textContent="Dashboard";
-  const [d,alertas]=await Promise.all([api("/api/dashboard"),api("/api/pneus-alertas")]);
-  const f=d.frota, ex=d.expedicoes, p=d.pneus;
-  const alertaHtml=alertas.length?`
-    <section class="panel" style="margin-top:16px;border:2px solid #f59e0b">
-      <h3>⚠️ ALERTA DE PNEUS — ATENÇÃO NECESSÁRIA</h3>
-      <p>Veículos abaixo possuem pneus para recapagem ou troca imediata.</p>
-      <div style="display:grid;gap:10px">
-        ${alertas.map(a=>`<div style="padding:12px;border-radius:10px;background:${Number(a.criticos)>0?"#fee2e2":"#fff7ed"}">
-          <b>🚚 Veículo ${fmt(a.prefixo)}</b> ${a.placa?`• ${fmt(a.placa)}`:""}
-          <div>${Number(a.criticos)>0?`🔴 <b>${a.criticos} crítico(s) — TROCA IMEDIATA</b>`:""}
-          ${Number(a.recapagem)>0?` 🟠 <b>${a.recapagem} para recapagem</b>`:""}</div>
-        </div>`).join("")}
-      </div>
-    </section>`:`<section class="panel" style="margin-top:16px"><h3>✅ Pneus sem alertas críticos</h3></section>`;
-  $("#content").innerHTML=`<div class="cards">
-   ${card("Total de Veículos",f.total,"🚚")}${card("Disponíveis",f.disponiveis,"✓")}${card("Em Manutenção",f.manutencao,"🛠")}${card("Em Rota",f.em_rota,"➜")}${card("Ocorrências Abertas",d.ocorrencias.abertas,"⚠")}
-  </div><div class="grid2"><section class="panel"><h3>Indicadores de Expedição</h3>
-  ${metric("Entregues",ex.entregues,ex.total)}${metric("Pendentes",ex.pendentes,ex.total)}
-  <p><b>${ex.total}</b> expedições cadastradas</p></section>
-  <section class="panel"><h3>Pneus</h3><p>🟢 Bons: <b>${p.bons}</b></p><p>🟠 Recapagem: <b>${p.recapagem}</b></p><p>🔴 Críticos: <b>${p.criticos}</b></p><p>Total: <b>${p.total}</b></p></section></div>
-  ${alertaHtml}`;
+  $("#pageTitle").textContent="Dashboard Operacional";
+  try{
+    const d=await api("/api/dashboard-operacional"),r=d.resumo||{};
+    const dinheiro=n=>Number(n||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+    const gastos=(d.ranking_gastos||[]).map((x,i)=>`<tr><td>${i+1}º</td><td><b>${escapeHtml(x.prefixo)}</b><br><small>${escapeHtml(x.placa||"")}</small></td><td><b>${dinheiro(x.total)}</b></td></tr>`).join("");
+    const combust=(d.ranking_combustivel||[]).map((x,i)=>`<tr><td>${i+1}º</td><td><b>${escapeHtml(x.prefixo)}</b><br><small>${escapeHtml(x.placa||"")}</small></td><td>${Number(x.litros||0).toLocaleString("pt-BR")} L</td><td>${dinheiro(x.valor)}</td></tr>`).join("");
+    const frota=(d.veiculos||[]).map(v=>`<tr><td><b>${escapeHtml(v.prefixo)}</b></td><td>${escapeHtml(v.placa||"-")}</td><td>${escapeHtml(v.modelo||"-")}</td><td><span class="dash-status ${v.status_operacional==='Em rota'?'rota':v.status_operacional==='Manutenção'?'manut':'parado'}">${escapeHtml(v.status_operacional)}</span></td><td>${v.checklist_hoje?'✅ Feito':'⚠️ Pendente'}</td><td>${v.os_abertas||0}</td><td>${v.chamados_abertos||0}</td></tr>`).join("");
+    $("#content").innerHTML=`<div class="cards">${card("Total da frota",r.total,"🚚")}${card("Em rota",r.em_rota,"🟢")}${card("Parados",r.parados,"⏸")}${card("Checklist feito hoje",r.checklist_feito,"☑")}${card("O.S. abertas",r.os_abertas,"🔧")}${card("Chamados abertos",r.chamados_abertos,"🆘")}</div>
+      <div class="grid2" style="margin-top:16px"><section class="panel"><h3>🏆 Ranking de gastos — mês atual</h3><div class="table-wrap"><table><thead><tr><th>#</th><th>Veículo</th><th>Gasto</th></tr></thead><tbody>${gastos||'<tr><td colspan="3">Sem gastos registrados neste mês.</td></tr>'}</tbody></table></div></section>
+      <section class="panel"><h3>⛽ Ranking de combustível — mês atual</h3><div class="table-wrap"><table><thead><tr><th>#</th><th>Veículo</th><th>Litros</th><th>Valor</th></tr></thead><tbody>${combust||'<tr><td colspan="4">Sem abastecimentos registrados neste mês.</td></tr>'}</tbody></table></div></section></div>
+      <section class="panel" style="margin-top:16px"><h3>🚛 Situação diária da frota</h3><p>Status operacional, checklist e pendências por veículo.</p><div class="table-wrap"><table><thead><tr><th>Veículo</th><th>Placa</th><th>Modelo</th><th>Status</th><th>Checklist hoje</th><th>O.S.</th><th>Chamados</th></tr></thead><tbody>${frota}</tbody></table></div></section>`;
+  }catch(e){$("#content").innerHTML=`<section class="panel"><h3>Dashboard</h3><p>${escapeHtml(e.message)}</p></section>`}
 }
 function card(t,n,i){return `<div class="card"><small>${i} ${t}</small><div class="num">${n||0}</div></div>`}
 function metric(t,n,total){const pc=total?Math.round(n/total*100):0;return `<div><small>${t} — ${n||0} (${pc}%)</small><div class="bar"><i style="width:${pc}%"></i></div></div>`}
@@ -846,6 +837,20 @@ document.addEventListener("click",(e)=>{
  if(e.target?.id==="mobileMenuBtn"){document.body.classList.toggle("sidebar-open");return;}
  if(window.innerWidth<=900 && e.target?.closest?.("#nav [data-page]"))document.body.classList.remove("sidebar-open");
 });
+
+async function loadHistoricoServicos(){
+  $("#pageTitle").textContent="Histórico de Serviços";
+  const vs=await api("/api/veiculos");
+  $("#content").innerHTML=`<section class="panel"><h2>🗂 Histórico de Serviços</h2><p>Banco de consulta de O.S., chamados e manutenções concluídas.</p>
+    <div class="v32-filters"><label>Veículo<select id="hsVeiculo"><option value="">Todos</option>${vs.map(v=>`<option value="${v.id}">${escapeHtml(v.prefixo)} • ${escapeHtml(v.placa||"-")}</option>`).join("")}</select></label><label>Tipo<select id="hsTipo"><option value="">Todos</option><option value="OS">O.S.</option><option value="CHAMADO">Chamado</option><option value="MANUTENÇÃO">Manutenção</option></select></label><label>Data inicial<input type="date" id="hsIni"></label><label>Data final<input type="date" id="hsFim"></label><button class="primary" id="hsBuscar">Pesquisar</button></div><div id="hsResumo"></div><div id="hsTabela"></div></section>`;
+  async function buscar(){
+    const q=new URLSearchParams(); if($("#hsVeiculo").value)q.set("veiculo_id",$("#hsVeiculo").value);if($("#hsTipo").value)q.set("tipo",$("#hsTipo").value);if($("#hsIni").value)q.set("data_inicial",$("#hsIni").value);if($("#hsFim").value)q.set("data_final",$("#hsFim").value);
+    const rows=await api("/api/historico-servicos?"+q),total=rows.reduce((a,x)=>a+Number(x.valor||0),0),dinheiro=n=>Number(n||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+    $("#hsResumo").innerHTML=`<div class="cards" style="margin-top:16px">${card("Registros concluídos",rows.length,"✅")}${card("Valor registrado",dinheiro(total),"💰")}</div>`;
+    $("#hsTabela").innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>Tipo</th><th>Número</th><th>Veículo</th><th>Serviço / ocorrência</th><th>Empresa</th><th>Valor</th><th>Conclusão</th><th>Finalizado por</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${escapeHtml(x.tipo)}</td><td>${escapeHtml(x.numero||String(x.id))}</td><td><b>${escapeHtml(x.prefixo||"-")}</b><br><small>${escapeHtml(x.placa||"")}</small></td><td>${escapeHtml(x.descricao||"-")}</td><td>${escapeHtml(x.empresa||"-")}</td><td>${dinheiro(x.valor)}</td><td>${x.data_evento?new Date(x.data_evento).toLocaleString("pt-BR"):"-"}</td><td>${escapeHtml(x.finalizado_por||"-")}</td></tr>`).join("")}</tbody></table></div>`:`<div class="panel" style="margin-top:16px">Nenhum registro encontrado.</div>`;
+  }
+  $("#hsBuscar").onclick=buscar;buscar();
+}
 
 async function finalizarOrdemServico(id){
   if(!confirm("Confirma a FINALIZAÇÃO desta Ordem de Serviço? Ela sairá do acompanhamento de abertas e irá para o histórico do veículo."))return;
