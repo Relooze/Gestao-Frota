@@ -232,6 +232,21 @@ async function initDatabase() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS solicitacoes_abastecimento (
+      id SERIAL PRIMARY KEY,
+      usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+      veiculo_id INTEGER REFERENCES veiculos(id) ON DELETE SET NULL,
+      placa VARCHAR(30),
+      data_solicitacao DATE NOT NULL DEFAULT CURRENT_DATE,
+      status VARCHAR(30) NOT NULL DEFAULT 'Pendente',
+      observacao TEXT,
+      atendido_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+      atendido_em TIMESTAMPTZ,
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
     ALTER TABLE checklists ADD COLUMN IF NOT EXISTS usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL;
     ALTER TABLE checklists ADD COLUMN IF NOT EXISTS data_checklist DATE DEFAULT CURRENT_DATE;
     ALTER TABLE checklists ADD COLUMN IF NOT EXISTS status_tratamento VARCHAR(30) DEFAULT 'Pendente';
@@ -2512,8 +2527,13 @@ app.get("/api/ordens-servico/veiculo/:prefixo", auth, async (req,res) => {
 
 app.get("/api/ordens-servico/:id", auth, async (req,res) => {
   try {
-    const os=await pool.query(`SELECT os.*,v.prefixo,v.placa,v.tipo,v.modelo FROM ordens_servico os
-      JOIN veiculos v ON v.id=os.veiculo_id WHERE os.id=$1`,[req.params.id]);
+    let os;
+    if(String(req.user?.perfil||"").toLowerCase()==="motorista"){
+      os=await pool.query(`SELECT os.*,v.prefixo,v.placa,v.tipo,v.modelo FROM ordens_servico os JOIN veiculos v ON v.id=os.veiculo_id
+        WHERE os.id=$1 AND os.veiculo_id=COALESCE((SELECT veiculo_id FROM motorista_veiculo_dia WHERE usuario_id=$2 AND data_operacao=CURRENT_DATE),(SELECT veiculo_id FROM usuarios WHERE id=$2))`,[req.params.id,req.user.id]);
+    }else{
+      os=await pool.query(`SELECT os.*,v.prefixo,v.placa,v.tipo,v.modelo FROM ordens_servico os JOIN veiculos v ON v.id=os.veiculo_id WHERE os.id=$1`,[req.params.id]);
+    }
     if(!os.rowCount)return res.status(404).json({erro:"O.S. não encontrada."});
     const itens=await pool.query("SELECT * FROM ordem_servico_itens WHERE ordem_id=$1 ORDER BY id",[req.params.id]);
     res.json({ordem:os.rows[0],itens:itens.rows});
@@ -3155,47 +3175,63 @@ app.get("/api/historico-checklists", auth, async (req,res)=>{
     const perfil=String(req.user?.perfil||"").trim().toLowerCase();
     const uid=Number(req.user?.id||0);
     const {veiculo_id,motorista_id,data_inicial,data_final}=req.query||{};
-    const cr=(await pool.query(`SELECT column_name FROM information_schema.columns
-      WHERE table_schema='public' AND table_name='checklists'`)).rows.map(r=>r.column_name);
-    const pick=(...xs)=>xs.find(x=>cr.includes(x));
-    const dcol=pick("data_checklist","data","criado_em");
-    const ucol=pick("usuario_id","motorista_id","criado_por");
-    if(!dcol)return res.json([]);
-    let sql=`SELECT c.*,v.prefixo,v.placa,v.modelo`;
-    if(ucol)sql+=`,u.nome AS motorista_nome`;
-    sql+=` FROM checklists c LEFT JOIN veiculos v ON v.id=c.veiculo_id`;
-    if(ucol)sql+=` LEFT JOIN usuarios u ON u.id=c.${ucol}`;
-    sql+=` WHERE 1=1`;
+    let sql=`SELECT c.*,v.prefixo,v.placa,v.modelo,u.nome AS motorista_nome
+      FROM checklists c
+      LEFT JOIN veiculos v ON v.id=c.veiculo_id
+      LEFT JOIN usuarios u ON u.id=c.usuario_id
+      WHERE 1=1`;
     const p=[];
     if(perfil==="motorista"){
-      // O motorista pode consultar os checklists feitos por ele e o histórico do
-      // veículo selecionado/atribuído para o dia. Também recupera registros
-      // antigos vinculados a colaboradores pelo mesmo nome.
+      // Regra: o motorista enxerga seus próprios checklists e também os checklists
+      // dos veículos que já foram atribuídos a ele. Isso mantém o histórico visível
+      // mesmo depois da troca do veículo do dia.
       p.push(uid);
-      const puid=p.length;
-      p.push(String(req.user?.nome||""));
-      const pnome=p.length;
-      sql+=` AND (
-        ${ucol ? `c.${ucol}=$${puid}` : `FALSE`}
-        OR c.veiculo_id IN (
-          SELECT COALESCE(md.veiculo_id,u.veiculo_id)
-          FROM usuarios u
-          LEFT JOIN motorista_veiculo_dia md
-            ON md.usuario_id=u.id AND md.data_operacao=CURRENT_DATE
-          WHERE u.id=$${puid} AND COALESCE(md.veiculo_id,u.veiculo_id) IS NOT NULL
-        )
-        OR (c.usuario_id IS NULL AND c.colaborador_id IN (
-          SELECT id FROM colaboradores WHERE LOWER(TRIM(nome))=LOWER(TRIM($${pnome}))
-        ))
-      )`;
+      sql+=` AND (c.usuario_id=$${p.length} OR c.veiculo_id IN (
+        SELECT DISTINCT veiculo_id FROM motorista_veiculo_dia WHERE usuario_id=$${p.length}
+      ) OR c.veiculo_id=(SELECT veiculo_id FROM usuarios WHERE id=$${p.length}))`;
+    } else if(motorista_id){
+      p.push(Number(motorista_id)); sql+=` AND c.usuario_id=$${p.length}`;
     }
-    if(perfil!=="motorista" && motorista_id && ucol){p.push(Number(motorista_id));sql+=` AND c.${ucol}=$${p.length}`;}
     if(veiculo_id){p.push(Number(veiculo_id));sql+=` AND c.veiculo_id=$${p.length}`;}
-    if(data_inicial){p.push(data_inicial);sql+=` AND c.${dcol}::date >= $${p.length}::date`;}
-    if(data_final){p.push(data_final);sql+=` AND c.${dcol}::date <= $${p.length}::date`;}
-    sql+=` ORDER BY c.${dcol} DESC,c.id DESC LIMIT 1000`;
+    if(data_inicial){p.push(data_inicial);sql+=` AND COALESCE(c.data_checklist,c.criado_em::date) >= $${p.length}::date`;}
+    if(data_final){p.push(data_final);sql+=` AND COALESCE(c.data_checklist,c.criado_em::date) <= $${p.length}::date`;}
+    sql+=` ORDER BY COALESCE(c.data_checklist,c.criado_em::date) DESC,c.id DESC LIMIT 1000`;
     res.json((await pool.query(sql,p)).rows);
   }catch(e){console.error("historico-checklists",e);res.status(500).json({erro:"Erro ao consultar histórico de checklists."});}
+});
+
+// V3.4.6 - Solicitações de abastecimento
+app.post("/api/solicitacoes-abastecimento",auth,exigirSenhaAtualizada,async(req,res)=>{
+  try{
+    const perfil=String(req.user?.perfil||"").toLowerCase();
+    let vid=Number(req.body.veiculo_id||0);
+    if(perfil==="motorista"){
+      const q=await pool.query(`SELECT COALESCE((SELECT veiculo_id FROM motorista_veiculo_dia WHERE usuario_id=$1 AND data_operacao=CURRENT_DATE),(SELECT veiculo_id FROM usuarios WHERE id=$1)) veiculo_id`,[req.user.id]);
+      vid=Number(q.rows[0]?.veiculo_id||0);
+    }
+    if(!vid)return res.status(400).json({erro:"Selecione o veículo do dia antes de solicitar abastecimento."});
+    const v=await pool.query("SELECT placa FROM veiculos WHERE id=$1",[vid]);
+    if(!v.rowCount)return res.status(404).json({erro:"Veículo não encontrado."});
+    const data=req.body.data_solicitacao||new Date().toISOString().slice(0,10);
+    const r=await pool.query(`INSERT INTO solicitacoes_abastecimento(usuario_id,veiculo_id,placa,data_solicitacao,observacao) VALUES($1,$2,$3,$4,$5) RETURNING *`,[req.user.id,vid,v.rows[0].placa||req.body.placa||"",data,String(req.body.observacao||"")]);
+    res.status(201).json(r.rows[0]);
+  }catch(e){console.error(e);res.status(500).json({erro:"Erro ao solicitar abastecimento."});}
+});
+app.get("/api/solicitacoes-abastecimento",auth,exigirSenhaAtualizada,async(req,res)=>{
+  try{
+    const perfil=String(req.user?.perfil||"").toLowerCase(); const p=[];
+    let sql=`SELECT s.*,v.prefixo,v.modelo,u.nome motorista,a.nome atendido_por_nome FROM solicitacoes_abastecimento s LEFT JOIN veiculos v ON v.id=s.veiculo_id LEFT JOIN usuarios u ON u.id=s.usuario_id LEFT JOIN usuarios a ON a.id=s.atendido_por WHERE 1=1`;
+    if(perfil==="motorista"){p.push(req.user.id);sql+=` AND s.usuario_id=$${p.length}`;}
+    else if(!["admin","administrador","supervisor"].includes(perfil)) return res.status(403).json({erro:"Acesso não permitido."});
+    if(req.query.hoje==="1")sql+=` AND s.data_solicitacao=CURRENT_DATE`;
+    sql+=` ORDER BY CASE WHEN s.status='Pendente' THEN 0 ELSE 1 END,s.criado_em DESC`;
+    res.json((await pool.query(sql,p)).rows);
+  }catch(e){console.error(e);res.status(500).json({erro:"Erro ao consultar solicitações de abastecimento."});}
+});
+app.put("/api/solicitacoes-abastecimento/:id/status",auth,exigirSenhaAtualizada,somenteAdminSupervisor,async(req,res)=>{
+  const st=String(req.body.status||""); if(!["Pendente","Autorizado","Atendido","Recusado"].includes(st))return res.status(400).json({erro:"Status inválido."});
+  const r=await pool.query(`UPDATE solicitacoes_abastecimento SET status=$1,atendido_por=$2,atendido_em=CASE WHEN $1 IN ('Atendido','Recusado') THEN NOW() ELSE atendido_em END WHERE id=$3 RETURNING *`,[st,req.user.id,req.params.id]);
+  if(!r.rowCount)return res.status(404).json({erro:"Solicitação não encontrada."}); res.json(r.rows[0]);
 });
 
 initDatabase()

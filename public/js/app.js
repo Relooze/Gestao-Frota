@@ -62,6 +62,7 @@ $("#nav").onclick=e=>{
   else if(b.dataset.page==="usuarios") loadUsuarios();
   else if(b.dataset.page==="abertura-chamado") loadAberturaChamado();
   else if(b.dataset.page==="minhas-os") loadMinhasOS();
+  else if(b.dataset.page==="solicitacao-abastecimento") loadSolicitacaoAbastecimento();
   else if(b.dataset.page==="chamados-abertos") loadChamadosAbertos();
   else if(b.dataset.page==="perfil-motorista") loadPerfilMotorista();
   else loadList(b.dataset.page,b.textContent.trim());
@@ -733,10 +734,39 @@ async function loadMinhasOS(){
  $("#pageTitle").textContent="Andamento das Ordens de Serviço";
  try{
   const [s,rows]=await Promise.all([api("/api/sessao"),api("/api/motorista/minhas-os")]);
-  $("#content").innerHTML=`<section class="panel"><h2>🔧 O.S. do veículo ${escapeHtml(s.veiculo_prefixo||"-")}</h2><p>Acompanhe o andamento das manutenções do seu veículo.</p>
+  window.__minhasOS=rows;
+  $("#content").innerHTML=`<section class="panel"><h2>🔧 O.S. do veículo ${escapeHtml(s.veiculo_prefixo||"-")}</h2><p>Clique em uma O.S. para visualizar os detalhes e o status atual.</p>
   <div class="table-wrap"><table><thead><tr><th>O.S.</th><th>Abertura</th><th>Status</th><th>Serviços / demandas</th><th>Observação</th></tr></thead><tbody>
-  ${rows.map(x=>`<tr><td><b>${escapeHtml(x.numero||String(x.id))}</b></td><td>${x.criado_em?new Date(x.criado_em).toLocaleString("pt-BR"):"-"}</td><td><b>${escapeHtml(x.status)}</b></td>
+  ${rows.map(x=>`<tr data-driver-os="${x.id}" style="cursor:pointer" title="Clique para abrir a O.S."><td><b>${escapeHtml(x.numero||String(x.id))}</b></td><td>${x.criado_em?new Date(x.criado_em).toLocaleString("pt-BR"):"-"}</td><td><b>${escapeHtml(x.status)}</b></td>
   <td>${(x.itens||[]).map(i=>escapeHtml(i.descricao)).join("<br>")||"-"}</td><td>${escapeHtml(x.observacao||"-")}</td></tr>`).join("")||'<tr><td colspan="5">Nenhuma O.S. para este veículo.</td></tr>'}</tbody></table></div></section>`;
+  document.querySelectorAll("[data-driver-os]").forEach(tr=>tr.onclick=()=>abrirDetalheOSMotorista(tr.dataset.driverOs));
+ }catch(e){$("#content").innerHTML=`<section class="panel"><p>${escapeHtml(e.message)}</p></section>`}
+}
+async function abrirDetalheOSMotorista(id){
+ try{
+  const d=await api(`/api/ordens-servico/${id}`),o=d.ordem,it=d.itens||[];
+  const m=document.createElement("div");m.className="modal-bg";m.innerHTML=`<div class="modal"><button type="button" class="secondary" data-close-driver-os style="float:right">×</button><h2>🔧 ${escapeHtml(o.numero||String(o.id))}</h2>
+  <p><b>Veículo:</b> ${escapeHtml(o.prefixo||"-")} • ${escapeHtml(o.placa||"")}</p><div class="vehicle-info"><b>Status atual:</b> ${escapeHtml(o.status||"-")}</div>
+  <p><b>Abertura:</b> ${o.criado_em?new Date(o.criado_em).toLocaleString("pt-BR"):"-"}</p><h3>Serviços / demandas</h3>${it.length?it.map(x=>`<div class="vehicle-info"><b>${escapeHtml(x.descricao||"Serviço")}</b><br>Status: ${escapeHtml(x.status||"-")}</div>`).join(""):"<p>Sem itens registrados.</p>"}
+  <p><b>Observação:</b><br>${escapeHtml(o.observacao||"Sem observação.")}</p></div>`;document.body.appendChild(m);m.querySelector("[data-close-driver-os]").onclick=()=>m.remove();m.onclick=e=>{if(e.target===m)m.remove()};
+ }catch(e){alert(e.message)}
+}
+
+async function loadSolicitacaoAbastecimento(){
+ $("#pageTitle").textContent="Solicitação de Abastecimento";
+ const perfil=String(user?.perfil||"").toLowerCase();
+ try{
+  if(perfil==="motorista"){
+   const [s,rows]=await Promise.all([api("/api/sessao"),api("/api/solicitacoes-abastecimento")]);
+   const hoje=new Date().toISOString().slice(0,10);
+   $("#content").innerHTML=`<section class="panel"><h2>⛽ Solicitar abastecimento</h2><p>Envie a solicitação para o supervisor e administração.</p><form id="formSolicAbast"><div class="modal-grid"><label>Veículo<input value="${escapeHtml(s.veiculo_prefixo||"-")}" disabled></label><label>Placa<input value="${escapeHtml(s.placa||"-")}" disabled></label><label>Data<input name="data_solicitacao" type="date" value="${hoje}" required></label></div><label>Observação<textarea name="observacao" rows="3" placeholder="Informação adicional, se necessário"></textarea></label><div class="actions"><button class="primary">⛽ Enviar solicitação</button></div></form></section>
+   <section class="panel" style="margin-top:16px"><h3>Minhas solicitações</h3><div class="table-wrap"><table><thead><tr><th>Data</th><th>Veículo</th><th>Placa</th><th>Status</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${new Date(x.data_solicitacao+'T12:00:00').toLocaleDateString('pt-BR')}</td><td>${escapeHtml(x.prefixo||'-')}</td><td>${escapeHtml(x.placa||'-')}</td><td><b>${escapeHtml(x.status)}</b></td></tr>`).join('')||'<tr><td colspan="4">Nenhuma solicitação.</td></tr>'}</tbody></table></div></section>`;
+   $("#formSolicAbast").onsubmit=async e=>{e.preventDefault();const o=Object.fromEntries(new FormData(e.target));try{await api("/api/solicitacoes-abastecimento",{method:"POST",body:JSON.stringify(o)});alert("Solicitação enviada ao supervisor e administrador.");loadSolicitacaoAbastecimento()}catch(x){alert(x.message)}};
+  }else{
+   const rows=await api("/api/solicitacoes-abastecimento?hoje=1");
+   $("#content").innerHTML=`<section class="panel"><h2>⛽ Solicitações de abastecimento de hoje</h2><p><b>${rows.filter(x=>x.status==='Pendente').length}</b> solicitação(ões) pendente(s).</p><div class="table-wrap"><table><thead><tr><th>Hora</th><th>Motorista</th><th>Veículo</th><th>Placa</th><th>Status</th><th>Ação</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${new Date(x.criado_em).toLocaleTimeString('pt-BR')}</td><td>${escapeHtml(x.motorista||'-')}</td><td><b>${escapeHtml(x.prefixo||'-')}</b></td><td>${escapeHtml(x.placa||'-')}</td><td><b>${escapeHtml(x.status)}</b></td><td><select data-abast-status="${x.id}"><option ${x.status==='Pendente'?'selected':''}>Pendente</option><option ${x.status==='Autorizado'?'selected':''}>Autorizado</option><option ${x.status==='Atendido'?'selected':''}>Atendido</option><option ${x.status==='Recusado'?'selected':''}>Recusado</option></select></td></tr>`).join('')||'<tr><td colspan="6">Nenhuma solicitação hoje.</td></tr>'}</tbody></table></div></section>`;
+   document.querySelectorAll('[data-abast-status]').forEach(x=>x.onchange=async()=>{try{await api(`/api/solicitacoes-abastecimento/${x.dataset.abastStatus}/status`,{method:'PUT',body:JSON.stringify({status:x.value})});loadSolicitacaoAbastecimento()}catch(e){alert(e.message)}});
+  }
  }catch(e){$("#content").innerHTML=`<section class="panel"><p>${escapeHtml(e.message)}</p></section>`}
 }
 
@@ -759,7 +789,7 @@ async function aplicarMenuPorPerfil(){
     window.__sessao=s;
     user={...(user||{}),...s}; localStorage.setItem("user",JSON.stringify(user));
     const motorista=String(s.perfil||"").toLowerCase()==="motorista";
-    const permitidasMotorista=["dashboard","checklist-diario","checklists-realizados","abertura-chamado","minhas-os","perfil-motorista"];
+    const permitidasMotorista=["dashboard","checklist-diario","checklists-realizados","abertura-chamado","minhas-os","solicitacao-abastecimento","perfil-motorista"];
     document.body.classList.toggle("perfil-motorista",motorista);
     document.querySelectorAll("#nav [data-page]").forEach(b=>{
       b.hidden=motorista && !permitidasMotorista.includes(b.dataset.page);
