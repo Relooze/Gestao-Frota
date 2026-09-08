@@ -57,6 +57,7 @@ $("#nav").onclick=e=>{
   else if(b.dataset.page==="manutencao-caminhoes") loadManutencaoCategoria("CAMINHAO");
   else if(b.dataset.page==="manutencao-empilhadeiras") loadManutencaoCategoria("EMPILHADEIRA");
   else if(b.dataset.page==="checklist-diario") loadChecklistDiario();
+  else if(b.dataset.page==="checklists-realizados") paginaChecklistsRealizados();
   else if(b.dataset.page==="checklist-tratamento") loadTratamentoChecklist();
   else if(b.dataset.page==="usuarios") loadUsuarios();
   else if(b.dataset.page==="abertura-chamado") loadAberturaChamado();
@@ -758,7 +759,7 @@ async function aplicarMenuPorPerfil(){
     window.__sessao=s;
     user={...(user||{}),...s}; localStorage.setItem("user",JSON.stringify(user));
     const motorista=String(s.perfil||"").toLowerCase()==="motorista";
-    const permitidasMotorista=["dashboard","checklist-diario","abertura-chamado","minhas-os","perfil-motorista"];
+    const permitidasMotorista=["dashboard","checklist-diario","checklists-realizados","abertura-chamado","minhas-os","perfil-motorista"];
     document.body.classList.toggle("perfil-motorista",motorista);
     document.querySelectorAll("#nav [data-page]").forEach(b=>{
       b.hidden=motorista && !permitidasMotorista.includes(b.dataset.page);
