@@ -3167,7 +3167,28 @@ app.get("/api/historico-checklists", auth, async (req,res)=>{
     if(ucol)sql+=` LEFT JOIN usuarios u ON u.id=c.${ucol}`;
     sql+=` WHERE 1=1`;
     const p=[];
-    if(perfil==="motorista" && ucol){p.push(uid);sql+=` AND c.${ucol}=$${p.length}`;}
+    if(perfil==="motorista"){
+      // O motorista pode consultar os checklists feitos por ele e o histórico do
+      // veículo selecionado/atribuído para o dia. Também recupera registros
+      // antigos vinculados a colaboradores pelo mesmo nome.
+      p.push(uid);
+      const puid=p.length;
+      p.push(String(req.user?.nome||""));
+      const pnome=p.length;
+      sql+=` AND (
+        ${ucol ? `c.${ucol}=$${puid}` : `FALSE`}
+        OR c.veiculo_id IN (
+          SELECT COALESCE(md.veiculo_id,u.veiculo_id)
+          FROM usuarios u
+          LEFT JOIN motorista_veiculo_dia md
+            ON md.usuario_id=u.id AND md.data_operacao=CURRENT_DATE
+          WHERE u.id=$${puid} AND COALESCE(md.veiculo_id,u.veiculo_id) IS NOT NULL
+        )
+        OR (c.usuario_id IS NULL AND c.colaborador_id IN (
+          SELECT id FROM colaboradores WHERE LOWER(TRIM(nome))=LOWER(TRIM($${pnome}))
+        ))
+      )`;
+    }
     if(perfil!=="motorista" && motorista_id && ucol){p.push(Number(motorista_id));sql+=` AND c.${ucol}=$${p.length}`;}
     if(veiculo_id){p.push(Number(veiculo_id));sql+=` AND c.veiculo_id=$${p.length}`;}
     if(data_inicial){p.push(data_inicial);sql+=` AND c.${dcol}::date >= $${p.length}::date`;}
