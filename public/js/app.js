@@ -11,6 +11,14 @@ async function api(url,opt={}){
   if(!r.ok) throw new Error(data.erro||"Erro na operação");
   return data;
 }
+function asRows(data){
+  if(Array.isArray(data)) return data;
+  if(Array.isArray(data?.rows)) return data.rows;
+  if(Array.isArray(data?.dados)) return data.dados;
+  if(Array.isArray(data?.solicitacoes)) return data.solicitacoes;
+  return [];
+}
+
 async function boot(){
   if(token){
     showApp();
@@ -757,13 +765,14 @@ async function loadSolicitacaoAbastecimento(){
  const perfil=String(user?.perfil||"").toLowerCase();
  try{
   if(perfil==="motorista"){
-   const [s,rows]=await Promise.all([api("/api/sessao"),api("/api/solicitacoes-abastecimento")]);
+   const [s,rawRows]=await Promise.all([api("/api/sessao"),api("/api/solicitacoes-abastecimento")]);
+   const rows=asRows(rawRows);
    const hoje=new Date().toISOString().slice(0,10);
    $("#content").innerHTML=`<section class="panel"><h2>⛽ Solicitar abastecimento</h2><p>Envie a solicitação para o supervisor e administração.</p><form id="formSolicAbast"><div class="modal-grid"><label>Veículo<input value="${escapeHtml(s.veiculo_prefixo||"-")}" disabled></label><label>Placa<input value="${escapeHtml(s.placa||"-")}" disabled></label><label>Data<input name="data_solicitacao" type="date" value="${hoje}" required></label></div><label>Observação<textarea name="observacao" rows="3" placeholder="Informação adicional, se necessário"></textarea></label><div class="actions"><button class="primary">⛽ Enviar solicitação</button></div></form></section>
    <section class="panel" style="margin-top:16px"><h3>Minhas solicitações</h3><div class="table-wrap"><table><thead><tr><th>Data</th><th>Veículo</th><th>Placa</th><th>Status</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${new Date(x.data_solicitacao+'T12:00:00').toLocaleDateString('pt-BR')}</td><td>${escapeHtml(x.prefixo||'-')}</td><td>${escapeHtml(x.placa||'-')}</td><td><b>${escapeHtml(x.status)}</b></td></tr>`).join('')||'<tr><td colspan="4">Nenhuma solicitação.</td></tr>'}</tbody></table></div></section>`;
    $("#formSolicAbast").onsubmit=async e=>{e.preventDefault();const o=Object.fromEntries(new FormData(e.target));try{await api("/api/solicitacoes-abastecimento",{method:"POST",body:JSON.stringify(o)});alert("Solicitação enviada ao supervisor e administrador.");loadSolicitacaoAbastecimento()}catch(x){alert(x.message)}};
   }else{
-   const rows=await api("/api/solicitacoes-abastecimento?hoje=1");
+   const rows=asRows(await api("/api/solicitacoes-abastecimento?hoje=1"));
    $("#content").innerHTML=`<section class="panel"><h2>⛽ Solicitações de abastecimento de hoje</h2><p><b>${rows.filter(x=>x.status==='Pendente').length}</b> solicitação(ões) pendente(s).</p><div class="table-wrap"><table><thead><tr><th>Hora</th><th>Motorista</th><th>Veículo</th><th>Placa</th><th>Status</th><th>Ação</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${new Date(x.criado_em).toLocaleTimeString('pt-BR')}</td><td>${escapeHtml(x.motorista||'-')}</td><td><b>${escapeHtml(x.prefixo||'-')}</b></td><td>${escapeHtml(x.placa||'-')}</td><td><b>${escapeHtml(x.status)}</b></td><td><select data-abast-status="${x.id}"><option ${x.status==='Pendente'?'selected':''}>Pendente</option><option ${x.status==='Autorizado'?'selected':''}>Autorizado</option><option ${x.status==='Atendido'?'selected':''}>Atendido</option><option ${x.status==='Recusado'?'selected':''}>Recusado</option></select></td></tr>`).join('')||'<tr><td colspan="6">Nenhuma solicitação hoje.</td></tr>'}</tbody></table></div></section>`;
    document.querySelectorAll('[data-abast-status]').forEach(x=>x.onchange=async()=>{try{await api(`/api/solicitacoes-abastecimento/${x.dataset.abastStatus}/status`,{method:'PUT',body:JSON.stringify({status:x.value})});loadSolicitacaoAbastecimento()}catch(e){alert(e.message)}});
   }

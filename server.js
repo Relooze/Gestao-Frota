@@ -2196,17 +2196,19 @@ app.use("/api", (req,res,next)=>{
     const u=jwt.verify(token,JWT_SECRET);
     if(String(u.perfil||"").toLowerCase()!=="motorista") return next();
 
-    const p=req.path;
+    // Normaliza o caminho para funcionar tanto montado em /api quanto em req.originalUrl.
+    let p=String(req.path||req.url||"").split("?")[0];
+    p=p.replace(/^\/api(?=\/|$)/,"").replace(/\/$/,"")||"/";
     const permitidos=[
       /^\/sessao$/,
       /^\/motorista(\/|$)/,
       /^\/checklist-diario(\/|$)/,
-      /^\/historico-checklists(\/|$)/, // motorista pode consultar somente o próprio histórico
+      /^\/historico-checklists(\/|$)/,
       /^\/chamados$/,
       /^\/chamados\/meus$/,
-      /^\/veiculos$/,  // somente GET; usado para escolher o veículo do dia
-      /^\/ordens-servico\/\d+$/, // motorista pode abrir detalhes da O.S. do veículo do dia
-      /^\/solicitacoes-abastecimento$/ // motorista pode criar e consultar as próprias solicitações
+      /^\/veiculos$/,
+      /^\/ordens-servico\/\d+$/,
+      /^\/solicitacoes-abastecimento$/
     ];
     const ok=permitidos.some(rx=>rx.test(p));
     if(!ok) return res.status(403).json({erro:"Acesso não permitido para o perfil motorista."});
@@ -2798,10 +2800,14 @@ app.put("/api/checklist-tratamento/:id/status",auth,somenteAdminSupervisor,async
 
 
 app.get("/api/sessao",auth,async(req,res)=>{
-  const r=await pool.query(`SELECT u.id,u.nome,u.email,u.perfil,u.ativo,u.primeiro_acesso,u.veiculo_id,
+  const r=await pool.query(`SELECT u.id,u.nome,u.email,u.perfil,u.ativo,u.primeiro_acesso,
+    COALESCE(mvd.veiculo_id,u.veiculo_id) veiculo_id,
     v.prefixo veiculo_prefixo,v.placa,v.modelo
-    FROM usuarios u LEFT JOIN veiculos v ON v.id=u.veiculo_id WHERE u.id=$1`,[req.user.id]);
-  res.json(r.rows[0]);
+    FROM usuarios u
+    LEFT JOIN motorista_veiculo_dia mvd ON mvd.usuario_id=u.id AND mvd.data_operacao=CURRENT_DATE
+    LEFT JOIN veiculos v ON v.id=COALESCE(mvd.veiculo_id,u.veiculo_id)
+    WHERE u.id=$1 ORDER BY mvd.id DESC NULLS LAST LIMIT 1`,[req.user.id]);
+  res.json(r.rows[0]||{});
 });
 
 app.get("/api/motorista/minhas-os",auth,exigirSenhaAtualizada,async(req,res)=>{

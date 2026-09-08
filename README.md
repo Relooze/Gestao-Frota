@@ -105,3 +105,9 @@ Botões/endpoints para finalizar O.S. e chamados; O.S. concluídas saem do acomp
 ## V3.4.4
 - Corrigida permissão do perfil motorista para acessar /api/historico-checklists.
 - A API mantém o filtro automático pelo ID do motorista logado, impedindo consulta ao histórico de outros motoristas.
+
+
+## V3.4.8
+- Corrige permissões do motorista para visualizar detalhes da O.S.
+- Corrige Solicitação de Abastecimento (rows.map is not a function).
+- Usa o veículo selecionado no dia na sessão do motorista.
