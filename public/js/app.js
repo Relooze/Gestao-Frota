@@ -880,3 +880,57 @@ async function loadOrdensFinalizadas(){
   }
   $("#histBuscar").onclick=buscar;buscar();
 }
+
+
+// V3.4.2 - CHECKLISTS REALIZADOS
+async function paginaChecklistsRealizados(){
+ const main=document.querySelector("#content")||document.querySelector("main");
+ if(!main)return;
+ let vs=[],us=[];try{vs=await api("/api/veiculos")}catch(e){}
+ const p=String(window.user?.perfil||user?.perfil||"").toLowerCase();
+ if(p!=="motorista"){try{us=await api("/api/usuarios")}catch(e){}}
+ const vo=(Array.isArray(vs)?vs:[]).map(v=>`<option value="${v.id}">${v.prefixo} • ${v.placa||"-"}</option>`).join("");
+ const uo=(Array.isArray(us)?us:[]).filter(u=>String(u.perfil||"").toLowerCase()==="motorista").map(u=>`<option value="${u.id}">${u.nome}</option>`).join("");
+ main.innerHTML=`<section class="hcheck"><div class="hc-title"><h2>☑ Checklists Realizados</h2><p>Histórico dos checklists diários enviados.</p></div>
+ <div class="hc-filter">
+ ${p!=="motorista"?`<label>Motorista<select id="hcu"><option value="">Todos</option>${uo}</select></label>`:""}
+ <label>Veículo<select id="hcv"><option value="">Todos</option>${vo}</select></label>
+ <label>Data inicial<input id="hcdi" type="date"></label><label>Data final<input id="hcdf" type="date"></label>
+ <button class="btn-primary" onclick="buscarChecklistsRealizados()">Pesquisar</button>
+ </div><div class="hc-summary"><div><small>Realizados</small><b id="hct">0</b></div><div><small>Veículos verificados</small><b id="hcvn">0</b></div><div><small>Último realizado</small><b id="hcul">-</b></div></div>
+ <div id="hclist"></div></section>`;
+ await buscarChecklistsRealizados();
+}
+async function buscarChecklistsRealizados(){
+ const q=new URLSearchParams(), ids=[["veiculo_id","hcv"],["motorista_id","hcu"],["data_inicial","hcdi"],["data_final","hcdf"]];
+ ids.forEach(([k,id])=>{const v=document.getElementById(id)?.value;if(v)q.set(k,v)});
+ const box=document.getElementById("hclist");if(box)box.innerHTML="<p>Carregando...</p>";
+ try{
+  const d=await api("/api/historico-checklists?"+q);
+  const ar=Array.isArray(d)?d:[];
+  document.getElementById("hct").textContent=ar.length;
+  document.getElementById("hcvn").textContent=new Set(ar.map(x=>x.veiculo_id).filter(Boolean)).size;
+  const dt=x=>x.data_checklist||x.data||x.criado_em;
+  document.getElementById("hcul").textContent=ar[0]&&dt(ar[0])?new Date(dt(ar[0])).toLocaleDateString("pt-BR"):"-";
+  if(!ar.length){box.innerHTML='<div class="hc-empty"><b>Nenhum checklist realizado encontrado.</b></div>';return}
+  window.__histChecklist=ar;
+  box.innerHTML=`<div class="hc-table"><table><thead><tr><th>Data</th><th>Veículo</th><th>Placa</th><th>Motorista</th><th>Status</th><th></th></tr></thead><tbody>${ar.map((x,i)=>`<tr>
+  <td>${dt(x)?new Date(dt(x)).toLocaleString("pt-BR"):"-"}</td><td><b>${x.prefixo||"-"}</b></td><td>${x.placa||"-"}</td><td>${x.motorista_nome||"-"}</td><td><span class="hc-done">✓ Realizado</span></td>
+  <td><button class="btn-light" onclick="detalheChecklistRealizado(${i})">Ver detalhes</button></td></tr>`).join("")}</tbody></table></div>`;
+ }catch(e){box.innerHTML=`<div class="hc-empty"><b>Erro ao consultar histórico.</b><p>${e.message||""}</p></div>`}
+}
+function detalheChecklistRealizado(i){
+ const x=(window.__histChecklist||[])[i];if(!x)return;
+ let itens=x.itens||x.respostas||x.dados||null;if(typeof itens==="string"){try{itens=JSON.parse(itens)}catch(e){}}
+ let html="";
+ if(Array.isArray(itens))html=itens.map((z,n)=>`<div class="hc-line"><b>${n+1}. ${z.item||z.nome||z.pergunta||"Item"}</b><span>${z.status||z.resposta||"-"}</span><small>${z.observacao||""}</small></div>`).join("");
+ else html=`<p>${x.observacao||x.observacoes||"Sem observações registradas."}</p>`;
+ const m=document.createElement("div");m.className="hc-modal";m.innerHTML=`<div class="hc-modalbox"><button onclick="this.closest('.hc-modal').remove()" class="hc-x">×</button><h2>☑ Checklist • ${x.prefixo||"-"}</h2><p><b>Motorista:</b> ${x.motorista_nome||"-"} &nbsp; <b>Placa:</b> ${x.placa||"-"}</p>${html}</div>`;document.body.appendChild(m);
+}
+function addMenuChecklistsRealizados(){
+ const nav=document.querySelector("#nav")||document.querySelector("nav")||document.querySelector(".sidebar");if(!nav||nav.querySelector('[data-page="checklists-realizados"]'))return;
+ const a=document.createElement("a");a.href="#";a.dataset.page="checklists-realizados";a.className="nav-item";a.textContent="☑ Checklists Realizados";
+ const sair=[...nav.querySelectorAll("a,button")].find(x=>/sair/i.test(x.textContent||""));if(sair)nav.insertBefore(a,sair);else nav.appendChild(a);
+}
+document.addEventListener("click",e=>{const x=e.target.closest('[data-page="checklists-realizados"]');if(x){e.preventDefault();paginaChecklistsRealizados()}});
+document.addEventListener("DOMContentLoaded",()=>setTimeout(addMenuChecklistsRealizados,150));setTimeout(addMenuChecklistsRealizados,700);

@@ -3147,6 +3147,35 @@ async function importarDadosIniciaisUmaVez() {
   );
 }
 
+
+// V3.4.2 - Histórico de checklists realizados
+app.get("/api/historico-checklists", auth, async (req,res)=>{
+  try{
+    const perfil=String(req.user?.perfil||"").trim().toLowerCase();
+    const uid=Number(req.user?.id||0);
+    const {veiculo_id,motorista_id,data_inicial,data_final}=req.query||{};
+    const cr=(await pool.query(`SELECT column_name FROM information_schema.columns
+      WHERE table_schema='public' AND table_name='checklists'`)).rows.map(r=>r.column_name);
+    const pick=(...xs)=>xs.find(x=>cr.includes(x));
+    const dcol=pick("data_checklist","data","criado_em");
+    const ucol=pick("usuario_id","motorista_id","criado_por");
+    if(!dcol)return res.json([]);
+    let sql=`SELECT c.*,v.prefixo,v.placa,v.modelo`;
+    if(ucol)sql+=`,u.nome AS motorista_nome`;
+    sql+=` FROM checklists c LEFT JOIN veiculos v ON v.id=c.veiculo_id`;
+    if(ucol)sql+=` LEFT JOIN usuarios u ON u.id=c.${ucol}`;
+    sql+=` WHERE 1=1`;
+    const p=[];
+    if(perfil==="motorista" && ucol){p.push(uid);sql+=` AND c.${ucol}=$${p.length}`;}
+    if(perfil!=="motorista" && motorista_id && ucol){p.push(Number(motorista_id));sql+=` AND c.${ucol}=$${p.length}`;}
+    if(veiculo_id){p.push(Number(veiculo_id));sql+=` AND c.veiculo_id=$${p.length}`;}
+    if(data_inicial){p.push(data_inicial);sql+=` AND c.${dcol}::date >= $${p.length}::date`;}
+    if(data_final){p.push(data_final);sql+=` AND c.${dcol}::date <= $${p.length}::date`;}
+    sql+=` ORDER BY c.${dcol} DESC,c.id DESC LIMIT 1000`;
+    res.json((await pool.query(sql,p)).rows);
+  }catch(e){console.error("historico-checklists",e);res.status(500).json({erro:"Erro ao consultar histórico de checklists."});}
+});
+
 initDatabase()
   .then(migrarFinalizacaoOS)
   .then(importarDadosIniciaisUmaVez)
