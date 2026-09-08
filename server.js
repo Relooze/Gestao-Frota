@@ -2186,6 +2186,7 @@ app.use("/api", (req,res,next)=>{
       /^\/sessao$/,
       /^\/motorista(\/|$)/,
       /^\/checklist-diario(\/|$)/,
+      /^\/historico-checklists(\/|$)/, // motorista pode consultar somente o próprio histórico
       /^\/chamados$/,
       /^\/chamados\/meus$/,
       /^\/veiculos$/  // somente GET; usado para escolher o veículo do dia

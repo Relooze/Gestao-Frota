@@ -100,3 +100,8 @@ Botões/endpoints para finalizar O.S. e chamados; O.S. concluídas saem do acomp
 - Alteração do sulco recalcula automaticamente classificação, alerta e ação sugerida.
 - Demandas do veículo podem ser agrupadas em uma Ordem de Serviço para conferência e orçamento.
 - O.S. pode ser atualizada pelo fluxo operacional e finalizada; ao finalizar sai das abertas e permanece no histórico.
+
+
+## V3.4.4
+- Corrigida permissão do perfil motorista para acessar /api/historico-checklists.
+- A API mantém o filtro automático pelo ID do motorista logado, impedindo consulta ao histórico de outros motoristas.
