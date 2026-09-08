@@ -2204,12 +2204,18 @@ app.use("/api", (req,res,next)=>{
       /^\/historico-checklists(\/|$)/, // motorista pode consultar somente o próprio histórico
       /^\/chamados$/,
       /^\/chamados\/meus$/,
-      /^\/veiculos$/  // somente GET; usado para escolher o veículo do dia
+      /^\/veiculos$/,  // somente GET; usado para escolher o veículo do dia
+      /^\/ordens-servico\/\d+$/, // motorista pode abrir detalhes da O.S. do veículo do dia
+      /^\/solicitacoes-abastecimento$/ // motorista pode criar e consultar as próprias solicitações
     ];
     const ok=permitidos.some(rx=>rx.test(p));
     if(!ok) return res.status(403).json({erro:"Acesso não permitido para o perfil motorista."});
     if(p==="/veiculos" && req.method!=="GET")
       return res.status(403).json({erro:"Motorista não pode alterar dados da frota."});
+    if(/^\/ordens-servico\/\d+$/.test(p) && req.method!=="GET")
+      return res.status(403).json({erro:"Motorista pode apenas visualizar a O.S."});
+    if(p==="/solicitacoes-abastecimento" && !["GET","POST"].includes(req.method))
+      return res.status(403).json({erro:"Operação não permitida para o perfil motorista."});
     next();
   }catch(e){next()}
 });
