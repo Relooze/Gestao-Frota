@@ -926,19 +926,27 @@ async function loadOrdensFinalizadas(){
 async function paginaChecklistsRealizados(){
  const main=document.querySelector("#content")||document.querySelector("main");
  if(!main)return;
- let vs=[],us=[];try{vs=await api("/api/veiculos")}catch(e){}
+ let vs=[],us=[],veiculoDia=null;
  const p=String(window.user?.perfil||user?.perfil||"").toLowerCase();
- if(p!=="motorista"){try{us=await api("/api/usuarios")}catch(e){}}
+ if(p==="motorista"){
+   try{veiculoDia=await api("/api/motorista/veiculo-dia")}catch(e){}
+   if(veiculoDia)vs=[{id:veiculoDia.veiculo_id,prefixo:veiculoDia.prefixo,placa:veiculoDia.placa}];
+ }else{
+   try{vs=await api("/api/veiculos")}catch(e){}
+   try{us=await api("/api/usuarios")}catch(e){}
+ }
  const vo=(Array.isArray(vs)?vs:[]).map(v=>`<option value="${v.id}">${v.prefixo} • ${v.placa||"-"}</option>`).join("");
  const uo=(Array.isArray(us)?us:[]).filter(u=>String(u.perfil||"").toLowerCase()==="motorista").map(u=>`<option value="${u.id}">${u.nome}</option>`).join("");
  main.innerHTML=`<section class="hcheck"><div class="hc-title"><h2>☑ Checklists Realizados</h2><p>Histórico dos checklists diários enviados.</p></div>
  <div class="hc-filter">
  ${p!=="motorista"?`<label>Motorista<select id="hcu"><option value="">Todos</option>${uo}</select></label>`:""}
- <label>Veículo<select id="hcv"><option value="">Todos</option>${vo}</select></label>
+ <label>Veículo<select id="hcv" ${p==="motorista"?"disabled":""}>${p==="motorista"?(vo||'<option value="">Nenhum veículo selecionado hoje</option>'):'<option value="">Todos</option>'+vo}</select></label>
  <label>Data inicial<input id="hcdi" type="date"></label><label>Data final<input id="hcdf" type="date"></label>
  <button class="btn-primary" onclick="buscarChecklistsRealizados()">Pesquisar</button>
  </div><div class="hc-summary"><div><small>Realizados</small><b id="hct">0</b></div><div><small>Veículos verificados</small><b id="hcvn">0</b></div><div><small>Último realizado</small><b id="hcul">-</b></div></div>
+ ${p==="motorista"&&veiculoDia?`<div class="hc-vehicle"><b>🚚 Veículo selecionado hoje:</b> ${veiculoDia.prefixo} • ${veiculoDia.placa||"-"}</div>`:""}
  <div id="hclist"></div></section>`;
+ if(p==="motorista"&&veiculoDia) document.getElementById("hcv").value=String(veiculoDia.veiculo_id);
  await buscarChecklistsRealizados();
 }
 async function buscarChecklistsRealizados(){
@@ -946,7 +954,7 @@ async function buscarChecklistsRealizados(){
  ids.forEach(([k,id])=>{const v=document.getElementById(id)?.value;if(v)q.set(k,v)});
  const box=document.getElementById("hclist");if(box)box.innerHTML="<p>Carregando...</p>";
  try{
-  const d=await api("/api/historico-checklists?"+q);
+  const d=await api("/api/historico-checklists?"+q.toString());
   const ar=Array.isArray(d)?d:[];
   document.getElementById("hct").textContent=ar.length;
   document.getElementById("hcvn").textContent=new Set(ar.map(x=>x.veiculo_id).filter(Boolean)).size;

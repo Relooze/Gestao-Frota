@@ -3194,13 +3194,13 @@ app.get("/api/historico-checklists", auth, async (req,res)=>{
       WHERE 1=1`;
     const p=[];
     if(perfil==="motorista"){
-      // Regra: o motorista enxerga seus próprios checklists e também os checklists
-      // dos veículos que já foram atribuídos a ele. Isso mantém o histórico visível
-      // mesmo depois da troca do veículo do dia.
+      // V3.4.9: motorista consulta o histórico do veículo selecionado no início da sessão/dia.
+      // Não limita aos checklists feitos pelo próprio motorista: mostra o histórico do carro.
       p.push(uid);
-      sql+=` AND (c.usuario_id=$${p.length} OR c.veiculo_id IN (
-        SELECT DISTINCT veiculo_id FROM motorista_veiculo_dia WHERE usuario_id=$${p.length}
-      ) OR c.veiculo_id=(SELECT veiculo_id FROM usuarios WHERE id=$${p.length}))`;
+      sql+=` AND c.veiculo_id=COALESCE(
+        (SELECT veiculo_id FROM motorista_veiculo_dia WHERE usuario_id=$${p.length} AND data_operacao=CURRENT_DATE),
+        (SELECT veiculo_id FROM usuarios WHERE id=$${p.length})
+      )`;
     } else if(motorista_id){
       p.push(Number(motorista_id)); sql+=` AND c.usuario_id=$${p.length}`;
     }
