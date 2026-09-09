@@ -3074,9 +3074,7 @@ app.get("/api/:recurso", auth, async (req,res,next) => {
   res.json(r.rows);
 });
 
-app.use((req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
-});
+// SPA fallback movido para o final das rotas da API (V3.5.4)
 
 
 
@@ -3312,6 +3310,13 @@ app.put("/api/solicitacoes-abastecimento/:id/status",auth,exigirSenhaAtualizada,
     if(!r.rowCount) return res.status(404).json({erro:"Solicitação não encontrada."});
     res.json({sucesso:true,solicitacao:r.rows[0]});
   }catch(e){console.error("PUT solicitacoes-abastecimento",e);res.status(500).json({erro:"Erro ao atualizar solicitação."});}
+});
+
+// V3.5.4 - IMPORTANTE: o fallback da SPA deve vir DEPOIS de todas as rotas /api.
+// Antes ele interceptava GET/POST de /api/solicitacoes-abastecimento e devolvia index.html,
+// impedindo motorista, supervisor e administrador de enxergarem a mesma solicitação persistida.
+app.use((req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 initDatabase()
