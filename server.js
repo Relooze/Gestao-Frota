@@ -2741,7 +2741,14 @@ app.get("/api/checklist-diario/config",auth,async(req,res)=>{
 
 app.post("/api/checklist-diario",auth,async(req,res)=>{
   try{
-    const {veiculo_id,itens,observacao}=req.body;
+    let {veiculo_id,itens,observacao}=req.body;
+    // V3.5.2: motorista sempre grava o checklist no veículo selecionado para o dia.
+    // Evita histórico vazio quando a tela envia um veiculo_id antigo/stale.
+    if(String(req.user?.perfil||"").toLowerCase()==="motorista"){
+      const vd=await pool.query(`SELECT veiculo_id FROM motorista_veiculo_dia WHERE usuario_id=$1 AND data_operacao=CURRENT_DATE ORDER BY id DESC LIMIT 1`,[req.user.id]);
+      if(!vd.rowCount)return res.status(409).json({erro:"Selecione o veículo do dia antes de enviar o checklist."});
+      veiculo_id=vd.rows[0].veiculo_id;
+    }
     if(!veiculo_id)return res.status(400).json({erro:"Selecione o veículo."});
     if(!Array.isArray(itens)||itens.length!==CHECKLIST_DIARIO_ITENS.length)return res.status(400).json({erro:"Todos os 18 itens do checklist são obrigatórios."});
     for(let i=0;i<CHECKLIST_DIARIO_ITENS.length;i++){
@@ -3251,7 +3258,7 @@ app.post("/api/solicitacoes-abastecimento",auth,exigirSenhaAtualizada,async(req,
     const v=await pool.query("SELECT placa FROM veiculos WHERE id=$1",[vid]);
     if(!v.rowCount)return res.status(404).json({erro:"Veículo não encontrado."});
     const data=req.body.data_solicitacao||new Date().toISOString().slice(0,10);
-    const r=await pool.query(`INSERT INTO solicitacoes_abastecimento(usuario_id,veiculo_id,placa,data_solicitacao,observacao) VALUES($1,$2,$3,$4,$5) RETURNING *`,[req.user.id,vid,v.rows[0].placa||req.body.placa||"",data,String(req.body.observacao||"")]);
+    const r=await pool.query(`INSERT INTO solicitacoes_abastecimento(usuario_id,veiculo_id,placa,data_solicitacao,status,observacao) VALUES($1,$2,$3,$4,'Pendente',$5) RETURNING *`,[req.user.id,vid,v.rows[0].placa||req.body.placa||"",data,String(req.body.observacao||"")]);
     res.status(201).json(r.rows[0]);
   }catch(e){console.error(e);res.status(500).json({erro:"Erro ao solicitar abastecimento."});}
 });
@@ -3265,8 +3272,10 @@ app.get("/api/solicitacoes-abastecimento",auth,exigirSenhaAtualizada,async(req,r
       LEFT JOIN usuarios a ON a.id=s.atendido_por WHERE 1=1`;
     if(perfil==="motorista"){p.push(req.user.id);sql+=` AND s.usuario_id=$${p.length}`;}
     else if(!["admin","administrador","supervisor"].includes(perfil)) return res.status(403).json({erro:"Acesso não permitido."});
-    // Para gestão, hoje=1 mostra solicitações de hoje e TODAS ainda não encerradas.
-    if(req.query.hoje==="1") sql+=` AND (s.data_solicitacao=CURRENT_DATE OR s.status IN ('Pendente','Autorizado'))`;
+    // V3.5.2: gestão enxerga todo o histórico. O filtro visual destaca pendências,
+    // mas nenhuma solicitação desaparece por diferença de data/status legado.
+    // Motorista continua restrito às próprias solicitações.
+    if(req.query.hoje==="1" && perfil==="motorista") sql+=` AND s.data_solicitacao=CURRENT_DATE`;
     sql+=` ORDER BY CASE WHEN s.status='Pendente' THEN 0 WHEN s.status='Autorizado' THEN 1 ELSE 2 END,s.criado_em DESC`;
     const r=await pool.query(sql,p);
     res.json({rows:r.rows,total:r.rowCount,perfil});
