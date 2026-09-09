@@ -791,7 +791,38 @@ async function loadSolicitacaoAbastecimento(){
   }else{
    const rows=asRows(await api("/api/solicitacoes-abastecimento?hoje=1"));
    $("#content").innerHTML=`<section class="panel"><h2>⛽ Solicitações de abastecimento</h2><p><b>${rows.length}</b> registrada(s) • <b>${rows.filter(x=>String(x.status).toLowerCase()==='pendente').length}</b> pendente(s).</p><div class="actions"><button class="secondary" id="refreshAbast">🔄 Atualizar solicitações</button></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Hora</th><th>Motorista</th><th>Veículo</th><th>Placa</th><th>Status</th><th>Ação</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${x.data_solicitacao?formatarDataBR(x.data_solicitacao):'-'}</td><td>${x.criado_em?new Date(x.criado_em).toLocaleTimeString('pt-BR'):'-'}</td><td>${escapeHtml(x.motorista||'-')}</td><td><b>${escapeHtml(x.prefixo||'-')}</b></td><td>${escapeHtml(x.placa||'-')}</td><td><b>${escapeHtml(x.status||'-')}</b></td><td><select data-abast-status="${x.id}"><option ${x.status==='Pendente'?'selected':''}>Pendente</option><option ${x.status==='Autorizado'?'selected':''}>Autorizado</option><option ${x.status==='Atendido'?'selected':''}>Atendido</option><option ${x.status==='Recusado'?'selected':''}>Recusado</option></select></td></tr>`).join('')||'<tr><td colspan="7">Nenhuma solicitação registrada no banco.</td></tr>'}</tbody></table></div></section>`;
-   document.querySelectorAll('[data-abast-status]').forEach(x=>x.onchange=async()=>{try{await api(`/api/solicitacoes-abastecimento/${x.dataset.abastStatus}/status`,{method:'PUT',body:JSON.stringify({status:x.value})});loadSolicitacaoAbastecimento()}catch(e){alert(e.message)}});
+   document.querySelectorAll('[data-abast-status]').forEach(x=>x.onchange=async()=>{
+     const statusAnterior=x.dataset.statusAnterior||'Pendente';
+     try{
+       const resp=await api(`/api/solicitacoes-abastecimento/${x.dataset.abastStatus}/status`,{method:'PUT',body:JSON.stringify({status:x.value})});
+       x.dataset.statusAnterior=x.value;
+       if(x.value==='Autorizado'){
+         const sol=resp?.solicitacao||{};
+         const linha=x.closest('tr');
+         const c=linha?linha.querySelectorAll('td'):[];
+         const data=c[0]?.textContent?.trim()||'-';
+         const hora=c[1]?.textContent?.trim()||'-';
+         const motorista=c[2]?.textContent?.trim()||'-';
+         const veiculo=c[3]?.textContent?.trim()||'-';
+         const placa=c[4]?.textContent?.trim()||sol.placa||'-';
+         const msg=[
+           'AUTORIZAÇÃO DE ABASTECIMENTO – FROTA COMJOL',
+           '',
+           `Veículo: ${veiculo}`,
+           `Placa: ${placa}`,
+           `Motorista: ${motorista}`,
+           `Data: ${data}`,
+           `Hora da solicitação: ${hora}`,
+           'Status: AUTORIZADO',
+           '',
+           'Favor realizar o abastecimento do veículo acima.'
+         ].join('\n');
+         const wa=`https://wa.me/5584998946047?text=${encodeURIComponent(msg)}`;
+         window.open(wa,'_blank','noopener,noreferrer');
+       }
+       loadSolicitacaoAbastecimento();
+     }catch(e){x.value=statusAnterior;alert(e.message)}
+   });
    const refreshAbast=$("#refreshAbast"); if(refreshAbast) refreshAbast.onclick=()=>loadSolicitacaoAbastecimento();
   }
  }catch(e){$("#content").innerHTML=`<section class="panel"><p>${escapeHtml(e.message)}</p></section>`}
