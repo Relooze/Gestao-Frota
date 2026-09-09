@@ -3317,10 +3317,18 @@ app.put("/api/solicitacoes-abastecimento/:id/status",auth,exigirSenhaAtualizada,
     await garantirTabelaSolicitacoesAbastecimento();
     const st=String(req.body.status||"");
     if(!["Pendente","Autorizado","Atendido","Recusado"].includes(st)) return res.status(400).json({erro:"Status inválido."});
-    const r=await pool.query(`UPDATE solicitacoes_abastecimento SET status=$1,
-      atendido_por=CASE WHEN $1='Pendente' THEN NULL ELSE $2 END,
-      atendido_em=CASE WHEN $1='Pendente' THEN NULL ELSE NOW() END
-      WHERE id=$3 RETURNING *`,[st,req.user.id,req.params.id]);
+    // Evita conflito de tipagem do PostgreSQL entre TEXT/VARCHAR no CASE parametrizado.
+    // Fazemos atualizações explícitas para cada situação.
+    let r;
+    if(st === "Pendente"){
+      r=await pool.query(`UPDATE solicitacoes_abastecimento
+        SET status='Pendente', atendido_por=NULL, atendido_em=NULL
+        WHERE id=$1 RETURNING *`,[Number(req.params.id)]);
+    }else{
+      r=await pool.query(`UPDATE solicitacoes_abastecimento
+        SET status=$1::varchar, atendido_por=$2::integer, atendido_em=NOW()
+        WHERE id=$3::integer RETURNING *`,[st,Number(req.user.id),Number(req.params.id)]);
+    }
     if(!r.rowCount) return res.status(404).json({erro:"Solicitação não encontrada."});
     res.json({sucesso:true,solicitacao:r.rows[0]});
   }catch(e){console.error("PUT solicitacoes-abastecimento",e);res.status(500).json({erro:"Erro ao atualizar solicitação."});}
