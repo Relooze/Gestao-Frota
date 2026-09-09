@@ -104,12 +104,15 @@ async function loadDashboardMotorista(){
     </section>
     <section class="panel driver-actions" style="margin-top:16px"><h3>Ações do motorista</h3>
       <button class="primary" data-driver-go="checklist-diario">☑ Fazer Checklist Diário</button>
+      <button class="secondary" id="btnTrocarVeiculoDia">🔄 Alterar veículo de hoje</button>
       <button class="secondary" data-driver-go="abertura-chamado">🆘 Abrir Chamado</button>
       <button class="secondary" data-driver-go="minhas-os">🔧 Ver O.S. em andamento</button>
     </section>`;
     document.querySelectorAll("[data-driver-go]").forEach(b=>b.onclick=()=>{
       document.querySelector(`[data-page="${b.dataset.driverGo}"]`)?.click();
     });
+    const trocar=document.getElementById("btnTrocarVeiculoDia");
+    if(trocar) trocar.onclick=()=>abrirSelecaoVeiculoDia(true);
   }catch(e){
     if(e.message==="SELECIONAR_VEICULO_DIA") return abrirSelecaoVeiculoDia();
     $("#content").innerHTML=`<section class="panel"><h3>Dashboard do motorista</h3><p>${escapeHtml(e.message)}</p></section>`;
@@ -773,7 +776,7 @@ async function loadSolicitacaoAbastecimento(){
    $("#formSolicAbast").onsubmit=async e=>{e.preventDefault();const o=Object.fromEntries(new FormData(e.target));try{await api("/api/solicitacoes-abastecimento",{method:"POST",body:JSON.stringify(o)});alert("Solicitação enviada ao supervisor e administrador.");loadSolicitacaoAbastecimento()}catch(x){alert(x.message)}};
   }else{
    const rows=asRows(await api("/api/solicitacoes-abastecimento?hoje=1"));
-   $("#content").innerHTML=`<section class="panel"><h2>⛽ Solicitações de abastecimento de hoje</h2><p><b>${rows.filter(x=>x.status==='Pendente').length}</b> solicitação(ões) pendente(s).</p><div class="table-wrap"><table><thead><tr><th>Hora</th><th>Motorista</th><th>Veículo</th><th>Placa</th><th>Status</th><th>Ação</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${new Date(x.criado_em).toLocaleTimeString('pt-BR')}</td><td>${escapeHtml(x.motorista||'-')}</td><td><b>${escapeHtml(x.prefixo||'-')}</b></td><td>${escapeHtml(x.placa||'-')}</td><td><b>${escapeHtml(x.status)}</b></td><td><select data-abast-status="${x.id}"><option ${x.status==='Pendente'?'selected':''}>Pendente</option><option ${x.status==='Autorizado'?'selected':''}>Autorizado</option><option ${x.status==='Atendido'?'selected':''}>Atendido</option><option ${x.status==='Recusado'?'selected':''}>Recusado</option></select></td></tr>`).join('')||'<tr><td colspan="6">Nenhuma solicitação hoje.</td></tr>'}</tbody></table></div></section>`;
+   $("#content").innerHTML=`<section class="panel"><h2>⛽ Solicitações de abastecimento</h2><p><b>${rows.filter(x=>x.status==='Pendente').length}</b> pendente(s). A lista mostra as solicitações de hoje e qualquer pendência anterior.</p><div class="table-wrap"><table><thead><tr><th>Hora</th><th>Motorista</th><th>Veículo</th><th>Placa</th><th>Status</th><th>Ação</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${new Date(x.criado_em).toLocaleTimeString('pt-BR')}</td><td>${escapeHtml(x.motorista||'-')}</td><td><b>${escapeHtml(x.prefixo||'-')}</b></td><td>${escapeHtml(x.placa||'-')}</td><td><b>${escapeHtml(x.status)}</b></td><td><select data-abast-status="${x.id}"><option ${x.status==='Pendente'?'selected':''}>Pendente</option><option ${x.status==='Autorizado'?'selected':''}>Autorizado</option><option ${x.status==='Atendido'?'selected':''}>Atendido</option><option ${x.status==='Recusado'?'selected':''}>Recusado</option></select></td></tr>`).join('')||'<tr><td colspan="6">Nenhuma solicitação registrada ou pendente.</td></tr>'}</tbody></table></div></section>`;
    document.querySelectorAll('[data-abast-status]').forEach(x=>x.onchange=async()=>{try{await api(`/api/solicitacoes-abastecimento/${x.dataset.abastStatus}/status`,{method:'PUT',body:JSON.stringify({status:x.value})});loadSolicitacaoAbastecimento()}catch(e){alert(e.message)}});
   }
  }catch(e){$("#content").innerHTML=`<section class="panel"><p>${escapeHtml(e.message)}</p></section>`}
@@ -810,11 +813,11 @@ async function aplicarMenuPorPerfil(){
   }catch(e){}
 }
 
-async function abrirSelecaoVeiculoDia(){
+async function abrirSelecaoVeiculoDia(forcarTroca=false){
   if($("#modalVeiculoDia"))return;
   const vs=await api("/api/veiculos");
   document.body.insertAdjacentHTML("beforeend",`<div class="modal-bg" id="modalVeiculoDia"><form class="modal" id="formVeiculoDia">
-    <h2>🚚 Qual veículo você vai utilizar agora?</h2>
+    <h2>🚚 ${forcarTroca?"Alterar veículo de hoje":"Qual veículo você vai utilizar agora?"}</h2>
     <p>Antes de iniciar a operação, selecione o veículo. Em seguida você será direcionado para o Checklist Diário.</p>
     <label>Veículo que será utilizado<select name="veiculo_id" required><option value="">Selecione o veículo</option>${vs.map(v=>`<option value="${v.id}">${escapeHtml(v.prefixo)} • ${escapeHtml(v.placa||"-")} • ${escapeHtml(v.modelo||"")}</option>`).join("")}</select></label>
     <div class="actions"><button class="primary">Continuar para o Checklist</button></div></form></div>`);
@@ -822,7 +825,11 @@ async function abrirSelecaoVeiculoDia(){
     await api("/api/motorista/veiculo-dia",{method:"POST",body:JSON.stringify({veiculo_id:Number(fd.get("veiculo_id"))})});
     $("#modalVeiculoDia").remove();
     await aplicarMenuPorPerfil();
-    const b=document.querySelector('[data-page="checklist-diario"]'); if(b){b.click()} else loadChecklistDiario();
+    if(forcarTroca){
+      const b=document.querySelector('[data-page="dashboard"]'); if(b){b.click()} else loadDashboardMotorista();
+    }else{
+      const b=document.querySelector('[data-page="checklist-diario"]'); if(b){b.click()} else loadChecklistDiario();
+    }
   }catch(x){alert(x.message)}};
 }
 
@@ -950,12 +957,15 @@ async function paginaChecklistsRealizados(){
  await buscarChecklistsRealizados();
 }
 async function buscarChecklistsRealizados(){
- const q=new URLSearchParams(), ids=[["veiculo_id","hcv"],["motorista_id","hcu"],["data_inicial","hcdi"],["data_final","hcdf"]];
+ const q=new URLSearchParams();
+ const motorista=String(user?.perfil||"").toLowerCase()==="motorista";
+ const ids=motorista?[["data_inicial","hcdi"],["data_final","hcdf"]]:[["veiculo_id","hcv"],["motorista_id","hcu"],["data_inicial","hcdi"],["data_final","hcdf"]];
  ids.forEach(([k,id])=>{const v=document.getElementById(id)?.value;if(v)q.set(k,v)});
  const box=document.getElementById("hclist");if(box)box.innerHTML="<p>Carregando...</p>";
  try{
-  const d=await api("/api/historico-checklists?"+q.toString());
-  const ar=Array.isArray(d)?d:[];
+  const endpoint=String(user?.perfil||"").toLowerCase()==="motorista"?"/api/motorista/historico-checklists-veiculo-dia?":"/api/historico-checklists?";
+  const d=await api(endpoint+q.toString());
+  const ar=Array.isArray(d)?d:(Array.isArray(d?.rows)?d.rows:[]);
   document.getElementById("hct").textContent=ar.length;
   document.getElementById("hcvn").textContent=new Set(ar.map(x=>x.veiculo_id).filter(Boolean)).size;
   const dt=x=>x.data_checklist||x.data||x.criado_em;

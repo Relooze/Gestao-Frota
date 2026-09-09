@@ -111,3 +111,9 @@ Botões/endpoints para finalizar O.S. e chamados; O.S. concluídas saem do acomp
 - Corrige permissões do motorista para visualizar detalhes da O.S.
 - Corrige Solicitação de Abastecimento (rows.map is not a function).
 - Usa o veículo selecionado no dia na sessão do motorista.
+
+## V3.5.1
+- Histórico do motorista usa exclusivamente o veículo selecionado na sessão/dia e retorno padronizado.
+- Solicitações de abastecimento retornam objeto padronizado com `rows` e `total`.
+- Supervisor/administrador visualizam solicitações do dia e pendências/autorizadas anteriores.
+- Mensagens de lista vazia ajustadas.

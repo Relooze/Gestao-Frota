@@ -3212,6 +3212,32 @@ app.get("/api/historico-checklists", auth, async (req,res)=>{
   }catch(e){console.error("historico-checklists",e);res.status(500).json({erro:"Erro ao consultar histórico de checklists."});}
 });
 
+
+// V3.5.0 - Histórico do checklist pelo veículo selecionado no dia
+app.get("/api/motorista/historico-checklists-veiculo-dia",auth,somenteMotorista,async(req,res)=>{
+  try{
+    const ctx=await pool.query(`SELECT m.veiculo_id,v.prefixo,v.placa,v.modelo
+      FROM motorista_veiculo_dia m JOIN veiculos v ON v.id=m.veiculo_id
+      WHERE m.usuario_id=$1 AND m.data_operacao=CURRENT_DATE
+      ORDER BY m.id DESC LIMIT 1`,[req.user.id]);
+    if(!ctx.rowCount)return res.status(409).json({erro:"SELECIONAR_VEICULO_DIA"});
+    const vid=ctx.rows[0].veiculo_id;
+    const p=[vid];
+    let sql=`SELECT c.*,v.prefixo,v.placa,v.modelo,COALESCE(u.nome,col.nome,'-') AS motorista_nome
+      FROM checklists c
+      JOIN veiculos v ON v.id=c.veiculo_id
+      LEFT JOIN usuarios u ON u.id=c.usuario_id
+      LEFT JOIN colaboradores col ON col.id=c.colaborador_id
+      WHERE c.veiculo_id=$1`;
+    if(req.query.data_inicial){p.push(req.query.data_inicial);sql+=` AND COALESCE(c.data_checklist,c.criado_em::date)>=$${p.length}::date`;}
+    if(req.query.data_final){p.push(req.query.data_final);sql+=` AND COALESCE(c.data_checklist,c.criado_em::date)<=$${p.length}::date`;}
+    sql+=` ORDER BY COALESCE(c.data_checklist,c.criado_em::date) DESC,c.criado_em DESC,c.id DESC LIMIT 1000`;
+    const r=await pool.query(sql,p);
+    // V3.5.1: retorno padronizado e contexto do veículo do dia.
+    res.json({veiculo:ctx.rows[0],rows:Array.isArray(r.rows)?r.rows:[],total:Number(r.rowCount||0)});
+  }catch(e){console.error("historico-checklists-veiculo-dia",e);res.status(500).json({erro:"Erro ao consultar histórico do veículo selecionado."});}
+});
+
 // V3.4.6 - Solicitações de abastecimento
 app.post("/api/solicitacoes-abastecimento",auth,exigirSenhaAtualizada,async(req,res)=>{
   try{
@@ -3231,14 +3257,20 @@ app.post("/api/solicitacoes-abastecimento",auth,exigirSenhaAtualizada,async(req,
 });
 app.get("/api/solicitacoes-abastecimento",auth,exigirSenhaAtualizada,async(req,res)=>{
   try{
-    const perfil=String(req.user?.perfil||"").toLowerCase(); const p=[];
-    let sql=`SELECT s.*,v.prefixo,v.modelo,u.nome motorista,a.nome atendido_por_nome FROM solicitacoes_abastecimento s LEFT JOIN veiculos v ON v.id=s.veiculo_id LEFT JOIN usuarios u ON u.id=s.usuario_id LEFT JOIN usuarios a ON a.id=s.atendido_por WHERE 1=1`;
+    const perfil=String(req.user?.perfil||"").trim().toLowerCase(); const p=[];
+    let sql=`SELECT s.*,v.prefixo,v.modelo,u.nome motorista,a.nome atendido_por_nome
+      FROM solicitacoes_abastecimento s
+      LEFT JOIN veiculos v ON v.id=s.veiculo_id
+      LEFT JOIN usuarios u ON u.id=s.usuario_id
+      LEFT JOIN usuarios a ON a.id=s.atendido_por WHERE 1=1`;
     if(perfil==="motorista"){p.push(req.user.id);sql+=` AND s.usuario_id=$${p.length}`;}
     else if(!["admin","administrador","supervisor"].includes(perfil)) return res.status(403).json({erro:"Acesso não permitido."});
-    if(req.query.hoje==="1")sql+=` AND s.data_solicitacao=CURRENT_DATE`;
-    sql+=` ORDER BY CASE WHEN s.status='Pendente' THEN 0 ELSE 1 END,s.criado_em DESC`;
-    res.json((await pool.query(sql,p)).rows);
-  }catch(e){console.error(e);res.status(500).json({erro:"Erro ao consultar solicitações de abastecimento."});}
+    // Para gestão, hoje=1 mostra solicitações de hoje e TODAS ainda não encerradas.
+    if(req.query.hoje==="1") sql+=` AND (s.data_solicitacao=CURRENT_DATE OR s.status IN ('Pendente','Autorizado'))`;
+    sql+=` ORDER BY CASE WHEN s.status='Pendente' THEN 0 WHEN s.status='Autorizado' THEN 1 ELSE 2 END,s.criado_em DESC`;
+    const r=await pool.query(sql,p);
+    res.json({rows:r.rows,total:r.rowCount,perfil});
+  }catch(e){console.error("solicitacoes-abastecimento GET",e);res.status(500).json({erro:"Erro ao consultar solicitações de abastecimento."});}
 });
 app.put("/api/solicitacoes-abastecimento/:id/status",auth,exigirSenhaAtualizada,somenteAdminSupervisor,async(req,res)=>{
   const st=String(req.body.status||""); if(!["Pendente","Autorizado","Atendido","Recusado"].includes(st))return res.status(400).json({erro:"Status inválido."});
