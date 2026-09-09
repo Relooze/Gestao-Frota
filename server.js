@@ -2209,7 +2209,8 @@ app.use("/api", (req,res,next)=>{
       /^\/chamados\/meus$/,
       /^\/veiculos$/,
       /^\/ordens-servico\/\d+$/,
-      /^\/solicitacoes-abastecimento$/
+      /^\/solicitacoes-abastecimento$/,
+      /^\/solicitacoes-abastecimento\/\d+\/registrar$/
     ];
     const ok=permitidos.some(rx=>rx.test(p));
     if(!ok) return res.status(403).json({erro:"Acesso não permitido para o perfil motorista."});
@@ -2219,6 +2220,8 @@ app.use("/api", (req,res,next)=>{
       return res.status(403).json({erro:"Motorista pode apenas visualizar a O.S."});
     if(p==="/solicitacoes-abastecimento" && !["GET","POST"].includes(req.method))
       return res.status(403).json({erro:"Operação não permitida para o perfil motorista."});
+    if(/^\/solicitacoes-abastecimento\/\d+\/registrar$/.test(p) && req.method!=="POST")
+      return res.status(403).json({erro:"Motorista pode apenas registrar o abastecimento autorizado."});
     next();
   }catch(e){next()}
 });
