@@ -94,3 +94,11 @@ input,select,textarea{border:1px solid #dbe2ec!important;border-radius:8px!impor
 /* V3.4.2 Checklists realizados */
 .hcheck{padding:18px}.hc-title,.hc-filter,.hc-summary>div,.hc-table,.hc-empty{background:#fff;border:1px solid #e1e7ef;border-radius:14px}.hc-title{padding:18px;margin-bottom:12px}.hc-title h2{margin:0}.hc-title p{color:#667085}.hc-filter{display:grid;grid-template-columns:repeat(4,1fr) auto;gap:10px;padding:14px;margin-bottom:12px;align-items:end}.hc-filter label{display:flex;flex-direction:column;gap:5px;font-size:13px}.hc-filter input,.hc-filter select{padding:10px;border:1px solid #ccd6e2;border-radius:8px}.hc-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}.hc-summary>div{padding:16px}.hc-summary small{display:block;color:#667085}.hc-summary b{font-size:25px;display:block;margin-top:6px}.hc-table{overflow:auto}.hc-table table{width:100%;border-collapse:collapse}.hc-table th,.hc-table td{padding:12px;border-bottom:1px solid #edf0f4;text-align:left}.hc-done{font-weight:700}.hc-empty{padding:20px}.hc-modal{position:fixed;inset:0;background:#0008;z-index:9999;display:flex;align-items:center;justify-content:center}.hc-modalbox{position:relative;background:#fff;border-radius:16px;padding:22px;width:min(850px,94vw);max-height:88vh;overflow:auto}.hc-x{position:absolute;right:14px;top:10px;border:0;background:none;font-size:25px}.hc-line{padding:12px;border-bottom:1px solid #eee;display:grid;grid-template-columns:1fr auto}.hc-line small{grid-column:1/-1;color:#667085;margin-top:4px}
 @media(max-width:700px){.hc-filter,.hc-summary{grid-template-columns:1fr}.hc-table{font-size:12px}}
+
+/* V3.6.0 - status rápido da frota */
+.vehicle-status-inline{border:1px solid #d7dfeb;border-radius:8px;padding:7px 28px 7px 10px;font-weight:700;background:#f8fafc;cursor:pointer;min-width:112px;}
+.vehicle-status-inline.status-disponivel{background:#eaf8ef;}
+.vehicle-status-inline.status-em-rota{background:#eaf2ff;}
+.vehicle-status-inline.status-manutencao{background:#fff4df;}
+.vehicle-status-inline.status-inativo{background:#f1f3f5;}
+.vehicle-status-inline:disabled{opacity:.6;cursor:wait;}

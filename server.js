@@ -2289,6 +2289,23 @@ app.put("/api/veiculos/:id", auth, async (req,res) => {
     [prefixo,placa||null,tipo,modelo||null,capacidade_kg||0,km_atual||0,status||"Disponível",observacao||null,req.params.id]);
   res.json(r.rows[0]);
 });
+// ALTERAR SOMENTE O STATUS DO VEÍCULO - V3.6.0
+app.patch("/api/veiculos/:id/status", auth, async (req,res) => {
+  try {
+    if (String(req.user?.perfil || "").toLowerCase() === "motorista")
+      return res.status(403).json({erro:"Motorista não possui permissão para alterar o status da frota."});
+    const permitidos = ["Disponível","Em rota","Manutenção","Inativo"];
+    const status = String(req.body?.status || "").trim();
+    if (!permitidos.includes(status)) return res.status(400).json({erro:"Status de veículo inválido."});
+    const r = await pool.query("UPDATE veiculos SET status=$1 WHERE id=$2 RETURNING *", [status, req.params.id]);
+    if (!r.rowCount) return res.status(404).json({erro:"Veículo não encontrado."});
+    res.json(r.rows[0]);
+  } catch (erro) {
+    console.error("Erro ao alterar status do veículo:", erro);
+    res.status(500).json({erro:"Não foi possível alterar o status do veículo."});
+  }
+});
+
 // EXCLUIR VEÍCULO
 app.delete("/api/veiculos/:id", auth, async (req, res) => {
   try {

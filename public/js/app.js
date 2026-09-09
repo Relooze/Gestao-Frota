@@ -900,9 +900,30 @@ async function loadList(resource,title){
   else{
     const keys=Object.keys(rows[0]).filter(k=>!["senha_hash","itens"].includes(k)).slice(0,8);
     if(resource==="veiculos") keys.push("__acoes");
-    html+=`<div class="table-wrap"><table><thead><tr>${keys.map(k=>`<th>${k==="__acoes"?"Ações":k.replaceAll("_"," ")}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${keys.map(k=>k==="__acoes"?`<td><button class="secondary" onclick='editVehicle(${JSON.stringify(r)})'>Editar</button> <button class="secondary" onclick="deleteVehicle(${r.id},'${String(r.prefixo).replaceAll("'","")}')">Excluir</button></td>`:`<td>${fmt(r[k])}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+    html+=`<div class="table-wrap"><table><thead><tr>${keys.map(k=>`<th>${k==="__acoes"?"Ações":k.replaceAll("_"," ")}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${keys.map(k=>{
+      if(k==="__acoes") return `<td><button class="secondary" onclick='editVehicle(${JSON.stringify(r)})'>Editar</button> <button class="secondary" onclick="deleteVehicle(${r.id},'${String(r.prefixo).replaceAll("'","")}')">Excluir</button></td>`;
+      if(resource==="veiculos" && k==="status") return `<td><select class="vehicle-status-inline status-${String(r.status||"Disponível").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replaceAll(" ","-")}" data-vehicle-status="${r.id}" data-current="${escapeHtml(r.status||"Disponível")}" title="Clique para alterar o status">${["Disponível","Em rota","Manutenção","Inativo"].map(st=>`<option value="${st}" ${st===(r.status||"Disponível")?"selected":""}>${st}</option>`).join("")}</select></td>`;
+      return `<td>${fmt(r[k])}</td>`;
+    }).join("")}</tr>`).join("")}</tbody></table></div>`;
   }
   $("#content").innerHTML=html;
+  if(resource==="veiculos"){
+    document.querySelectorAll("[data-vehicle-status]").forEach(sel=>{
+      sel.onchange=async()=>{
+        const anterior=sel.dataset.current||"Disponível";
+        const novo=sel.value;
+        sel.disabled=true;
+        try{
+          await api(`/api/veiculos/${sel.dataset.vehicleStatus}/status`,{method:"PATCH",body:JSON.stringify({status:novo})});
+          sel.dataset.current=novo;
+          sel.className=`vehicle-status-inline status-${novo.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replaceAll(" ","-")}`;
+        }catch(e){
+          sel.value=anterior;
+          alert("Não foi possível alterar o status do veículo: "+e.message);
+        }finally{sel.disabled=false;}
+      };
+    });
+  }
 }
 function fmt(v){if(v===null||v===undefined||v==="")return "-";if(typeof v==="boolean")return v?"Sim":"Não";return String(v).slice(0,80)}
 
