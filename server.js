@@ -2965,6 +2965,70 @@ app.get("/api/motorista/contexto-dia",auth,somenteMotorista,async(req,res)=>{
 });
 
 
+
+// ======================================================
+// V3.7.3 - EXCLUSÕES ADMINISTRATIVAS
+// Somente o perfil admin pode apagar registros definitivos.
+// ======================================================
+function somenteAdmin(req,res,next){
+  if(String(req.user?.perfil||'').trim().toLowerCase()!=='admin')
+    return res.status(403).json({erro:'Apenas o administrador pode excluir registros.'});
+  next();
+}
+
+app.delete('/api/usuarios/:id',auth,exigirSenhaAtualizada,somenteAdmin,async(req,res)=>{
+  try{
+    const id=Number(req.params.id);
+    if(id===Number(req.user.id)) return res.status(400).json({erro:'Não é permitido excluir o próprio usuário logado.'});
+    const r=await pool.query('DELETE FROM usuarios WHERE id=$1 RETURNING id,nome,email',[id]);
+    if(!r.rowCount)return res.status(404).json({erro:'Usuário não encontrado.'});
+    res.json({sucesso:true,excluido:r.rows[0]});
+  }catch(e){console.error('DELETE usuario',e);res.status(500).json({erro:'Erro ao excluir usuário.'});}
+});
+
+app.delete('/api/manutencoes/:id',auth,exigirSenhaAtualizada,somenteAdmin,async(req,res)=>{
+  try{
+    const r=await pool.query('DELETE FROM manutencoes WHERE id=$1 RETURNING id,veiculo_prefixo,descricao',[Number(req.params.id)]);
+    if(!r.rowCount)return res.status(404).json({erro:'Serviço realizado não encontrado.'});
+    res.json({sucesso:true});
+  }catch(e){console.error('DELETE manutencao',e);res.status(500).json({erro:'Erro ao excluir serviço realizado.'});}
+});
+
+app.delete('/api/abastecimentos/:id',auth,exigirSenhaAtualizada,somenteAdmin,async(req,res)=>{
+  const c=await pool.connect();
+  try{
+    await garantirControleConsumoV370(); await c.query('BEGIN');
+    const a=await c.query('DELETE FROM abastecimentos WHERE id=$1 RETURNING solicitacao_id',[Number(req.params.id)]);
+    if(!a.rowCount){await c.query('ROLLBACK');return res.status(404).json({erro:'Abastecimento não encontrado.'});}
+    if(a.rows[0].solicitacao_id) await c.query("UPDATE solicitacoes_abastecimento SET status='Autorizado',atendido_em=NULL WHERE id=$1",[a.rows[0].solicitacao_id]);
+    await c.query('COMMIT'); res.json({sucesso:true});
+  }catch(e){await c.query('ROLLBACK');console.error('DELETE abastecimento',e);res.status(500).json({erro:'Erro ao excluir abastecimento.'});}
+  finally{c.release();}
+});
+
+app.delete('/api/chamados/:id',auth,exigirSenhaAtualizada,somenteAdmin,async(req,res)=>{
+  try{
+    const id=Number(req.params.id);
+    const r=await pool.query('DELETE FROM chamados WHERE id=$1 RETURNING id,numero',[id]);
+    if(!r.rowCount)return res.status(404).json({erro:'Chamado não encontrado.'});
+    res.json({sucesso:true});
+  }catch(e){console.error('DELETE chamado',e);res.status(500).json({erro:'Erro ao excluir chamado.'});}
+});
+
+app.delete('/api/ordens-servico/:id',auth,exigirSenhaAtualizada,somenteAdmin,async(req,res)=>{
+  const c=await pool.connect();
+  try{
+    const id=Number(req.params.id); await c.query('BEGIN');
+    // Desvincula as origens antes de apagar a O.S.; os itens são removidos por CASCADE.
+    await c.query("UPDATE chamados SET ordem_servico_id=NULL,status=CASE WHEN status='O.S. gerada' THEN 'Aberto' ELSE status END,atualizado_em=NOW() WHERE ordem_servico_id=$1",[id]);
+    await c.query("UPDATE checklists SET ordem_servico_id=NULL,status_tratamento=CASE WHEN status_tratamento='O.S. gerada' THEN 'Pendente' ELSE status_tratamento END WHERE ordem_servico_id=$1",[id]);
+    const r=await c.query('DELETE FROM ordens_servico WHERE id=$1 RETURNING id,numero',[id]);
+    if(!r.rowCount){await c.query('ROLLBACK');return res.status(404).json({erro:'O.S. não encontrada.'});}
+    await c.query('COMMIT'); res.json({sucesso:true,excluida:r.rows[0]});
+  }catch(e){await c.query('ROLLBACK');console.error('DELETE OS',e);res.status(500).json({erro:'Erro ao excluir O.S.'});}
+  finally{c.release();}
+});
+
 // ======================================================
 // V3.2 - FINALIZAÇÃO E HISTÓRICO DE O.S. / CHAMADOS
 // ======================================================
@@ -3368,32 +3432,45 @@ async function garantirControleConsumoV370(){
 }
 
 app.post('/api/solicitacoes-abastecimento/:id/registrar',auth,exigirSenhaAtualizada,async(req,res)=>{
-  const client=await pool.connect();
   try{
     await garantirControleConsumoV370();
-    const id=Number(req.params.id), litros=Number(req.body.litros), km=Number(req.body.km);
-    if(!(litros>0)||!(km>=0)) return res.status(400).json({erro:'Informe litros e KM válidos.'});
-    await client.query('BEGIN');
-    const sol=await client.query(`SELECT s.*,v.prefixo,v.placa FROM solicitacoes_abastecimento s LEFT JOIN veiculos v ON v.id=s.veiculo_id WHERE s.id=$1 FOR UPDATE`,[id]);
-    if(!sol.rowCount){await client.query('ROLLBACK');return res.status(404).json({erro:'Solicitação não encontrada.'});}
-    const x=sol.rows[0], perfil=String(req.user.perfil||'').toLowerCase();
-    if(perfil==='motorista' && Number(x.usuario_id)!==Number(req.user.id)){await client.query('ROLLBACK');return res.status(403).json({erro:'Esta solicitação não pertence ao motorista logado.'});}
-    if(!['motorista','admin','administrador','supervisor'].includes(perfil)){await client.query('ROLLBACK');return res.status(403).json({erro:'Acesso não permitido.'});}
-    if(String(x.status)!=='Autorizado'){await client.query('ROLLBACK');return res.status(400).json({erro:'O abastecimento precisa estar Autorizado antes do lançamento.'});}
-    const ja=await client.query('SELECT id FROM abastecimentos WHERE solicitacao_id=$1',[id]);
-    if(ja.rowCount){await client.query('ROLLBACK');return res.status(409).json({erro:'Este abastecimento já foi registrado.'});}
-    const ant=await client.query(`SELECT km FROM abastecimentos WHERE veiculo_id=$1 AND km IS NOT NULL ORDER BY data DESC,criado_em DESC,id DESC LIMIT 1`,[x.veiculo_id]);
-    const kmAnterior=ant.rowCount?Number(ant.rows[0].km):null;
+    const id=Number(req.params.id);
+    const litros=Number(String(req.body?.litros ?? '').replace(',','.'));
+    const km=Number(String(req.body?.km ?? '').replace(',','.'));
+    if(!Number.isInteger(id) || id<=0) return res.status(400).json({erro:'Solicitação inválida.'});
+    if(!Number.isFinite(litros) || litros<=0) return res.status(400).json({erro:'Informe uma quantidade de litros válida.'});
+    if(!Number.isFinite(km) || km<0) return res.status(400).json({erro:'Informe o KM atual válido.'});
+
+    const sol=await pool.query(`SELECT s.*,v.prefixo,v.placa FROM solicitacoes_abastecimento s LEFT JOIN veiculos v ON v.id=s.veiculo_id WHERE s.id=$1`,[id]);
+    if(!sol.rowCount) return res.status(404).json({erro:'Solicitação não encontrada.'});
+    const x=sol.rows[0];
+    const perfil=String(req.user?.perfil||'').trim().toLowerCase();
+    if(!['motorista','admin','administrador','supervisor'].includes(perfil)) return res.status(403).json({erro:'Acesso não permitido.'});
+    if(perfil==='motorista' && Number(x.usuario_id)!==Number(req.user.id)) return res.status(403).json({erro:'Esta solicitação não pertence ao motorista logado.'});
+    if(String(x.status||'').trim().toLowerCase()!=='autorizado') return res.status(400).json({erro:'O abastecimento precisa estar Autorizado antes do lançamento.'});
+    if(!x.veiculo_id) return res.status(400).json({erro:'A solicitação não possui veículo vinculado.'});
+
+    const ja=await pool.query('SELECT id FROM abastecimentos WHERE solicitacao_id=$1 LIMIT 1',[id]);
+    if(ja.rowCount) return res.status(409).json({erro:'Este abastecimento já foi registrado.'});
+
+    const ant=await pool.query(`SELECT km FROM abastecimentos WHERE veiculo_id=$1 AND km IS NOT NULL ORDER BY data DESC,criado_em DESC,id DESC LIMIT 1`,[x.veiculo_id]);
+    const kmAnterior=ant.rowCount && ant.rows[0].km!=null ? Number(ant.rows[0].km) : null;
     const kmRodados=kmAnterior!==null && km>=kmAnterior ? km-kmAnterior : null;
     const media=kmRodados!==null && litros>0 ? kmRodados/litros : null;
-    const ins=await client.query(`INSERT INTO abastecimentos(veiculo_id,data,km,litros,valor_litro,valor_total,posto,solicitacao_id,usuario_id,km_anterior,km_rodados,media_km_l)
-      VALUES($1,CURRENT_DATE,$2,$3,0,0,NULL,$4,$5,$6,$7,$8) RETURNING *`,[x.veiculo_id,km,litros,id,req.user.id,kmAnterior,kmRodados,media]);
-    await client.query(`UPDATE solicitacoes_abastecimento SET status='Atendido',atendido_em=NOW() WHERE id=$1`,[id]);
-    await client.query(`UPDATE veiculos SET km_atual=GREATEST(COALESCE(km_atual,0),$1) WHERE id=$2`,[km,x.veiculo_id]);
-    await client.query('COMMIT');
-    res.status(201).json({sucesso:true,abastecimento:ins.rows[0]});
-  }catch(e){try{await client.query('ROLLBACK')}catch{} console.error('registrar abastecimento',e);res.status(500).json({erro:'Erro ao registrar abastecimento.'});}
-  finally{client.release()}
+
+    const ins=await pool.query(`INSERT INTO abastecimentos
+      (veiculo_id,data,km,litros,valor_litro,valor_total,posto,solicitacao_id,usuario_id,km_anterior,km_rodados,media_km_l)
+      VALUES($1,CURRENT_DATE,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [x.veiculo_id,km,litros,0,0,'Solicitação autorizada',id,req.user.id,kmAnterior,kmRodados,media]);
+
+    await pool.query(`UPDATE solicitacoes_abastecimento SET status='Atendido',atendido_em=NOW() WHERE id=$1`,[id]);
+    await pool.query(`UPDATE veiculos SET km_atual=CASE WHEN COALESCE(km_atual,0)<$1 THEN $1 ELSE COALESCE(km_atual,0) END WHERE id=$2`,[km,x.veiculo_id]);
+    console.log(`[ABASTECIMENTO] registrado solicitacao=${id} usuario=${req.user.id} veiculo=${x.veiculo_id} litros=${litros} km=${km}`);
+    return res.status(201).json({sucesso:true,abastecimento:ins.rows[0]});
+  }catch(e){
+    console.error('registrar abastecimento',e);
+    return res.status(500).json({erro:'Erro ao registrar abastecimento.',detalhe:process.env.NODE_ENV==='production'?undefined:e.message});
+  }
 });
 
 app.get('/api/abastecimentos-detalhados',auth,exigirSenhaAtualizada,async(req,res)=>{

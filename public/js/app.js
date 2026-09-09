@@ -138,6 +138,9 @@ function card(t,n,i){return `<div class="card"><small>${i} ${t}</small><div clas
 function metric(t,n,total){const pc=total?Math.round(n/total*100):0;return `<div><small>${t} — ${n||0} (${pc}%)</small><div class="bar"><i style="width:${pc}%"></i></div></div>`}
 
 const labels={veiculos:"Frota",expedicoes:"Expedição",pneus:"Pneus",manutencoes:"Manutenção",checklists:"Checklist",abastecimentos:"Combustível",ocorrencias:"Ocorrências",colaboradores:"Equipe"};
+function isAdmin(){return String(user?.perfil||window.__sessao?.perfil||"").toLowerCase()==="admin";}
+async function excluirOS(id,n){if(!confirm(`Excluir definitivamente a O.S. ${n}?`))return;try{await api(`/api/ordens-servico/${id}`,{method:"DELETE"});alert("O.S. excluída.");loadOrdensServico()}catch(e){alert(e.message)}}
+
 
 async function loadOrdensServico(){
   $("#pageTitle").textContent="Ordens de Serviço";
@@ -170,10 +173,11 @@ async function loadOrdensServico(){
         <td>${formatarDataBR(o.data_abertura)}</td><td><span class="os-badge">${fmt(o.status)}</span></td>
         <td>${Number(o.itens_pendentes||0)} / ${Number(o.total_itens||0)}</td>
         <td>R$ ${Number(o.valor_orcado||0).toFixed(2).replace(".",",")}</td>
-        <td><button class="secondary" data-open-os="${o.id}">Abrir</button> <button class="secondary" data-print-os="${o.id}">🖨 Imprimir</button></td>
+        <td><button class="secondary" data-open-os="${o.id}">Abrir</button> <button class="secondary" data-print-os="${o.id}">🖨 Imprimir</button> ${isAdmin()?`<button class="secondary" data-del-os="${o.id}" data-num="${escapeHtml(o.numero||o.id)}">🗑 Excluir</button>`:""}</td>
       </tr>`).join("")}</tbody></table></div>`:`<p>Não há Ordens de Serviço nesta situação.</p>`;
       $("#listaOS").querySelectorAll("[data-open-os]").forEach(b=>b.onclick=()=>abrirOS(b.dataset.openOs));
       $("#listaOS").querySelectorAll("[data-print-os]").forEach(b=>b.onclick=()=>imprimirOS(b.dataset.printOs));
+      $("#listaOS").querySelectorAll("[data-del-os]").forEach(b=>b.onclick=()=>excluirOS(b.dataset.delOs,b.dataset.num));
     };
     $("#filtroOS").onchange=render; render();
   }catch(e){$("#content").innerHTML=`<section class="panel"><h3>Ordens de Serviço</h3><p>${fmt(e.message)}</p></section>`}
@@ -563,7 +567,7 @@ async function carregarPainelManutencao(){
         <p>${hist.length} serviço(s) encontrado(s). Cada linha abaixo representa um lançamento da manutenção.</p>
       </div><div class="history-total">TOTAL<br><b>R$ ${total.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</b></div></div>
       ${hist.length?`<div class="table-wrap"><table class="history-table"><thead><tr>
-        <th>Data</th><th>Veículo</th><th>Serviço</th><th>Sistema</th><th>Descrição / item executado</th><th>Loja / Empresa</th><th>NF</th><th>Local</th><th>Valor</th>
+        <th>Data</th><th>Veículo</th><th>Serviço</th><th>Sistema</th><th>Descrição / item executado</th><th>Loja / Empresa</th><th>NF</th><th>Local</th><th>Valor</th>${isAdmin()?"<th>Ação</th>":""}
       </tr></thead><tbody>${hist.map(x=>`<tr>
         <td>${formatarDataBR(x.data_emissao||x.data_abertura)}</td>
         <td><b>${fmt(x.prefixo||x.veiculo_prefixo)}</b></td>
@@ -573,7 +577,7 @@ async function carregarPainelManutencao(){
         <td><b>${fmt(x.empresa)}</b></td>
         <td>${fmt(x.nota_fiscal)}</td>
         <td>${fmt(x.local)}</td>
-        <td class="money-cell"><b>R$ ${Number(x.custo||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</b></td>
+        <td class="money-cell"><b>R$ ${Number(x.custo||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</b></td>${isAdmin()?`<td><button class="secondary" data-del-manut="${x.id}">🗑 Excluir</button></td>`:""}
       </tr>`).join("")}</tbody></table></div>`:
       `<div class="empty-history"><b>Nenhuma manutenção encontrada para o veículo ${escapeHtml(prefixo||"selecionado")}.</b><br>Altere o período ou limpe os filtros.</div>`}
     </section>`;
@@ -691,8 +695,9 @@ async function loadUsuarios(){
   try{
     const [rows,vs]=await Promise.all([api("/api/usuarios"),api("/api/veiculos")]);
     $("#content").innerHTML=`<section class="panel"><div class="os-head"><div><h3>👤 Usuários e perfis de acesso</h3><p>Motorista: checklist diário. Supervisor: tratamento e O.S. Admin: acesso completo.</p></div><button class="primary" id="novoUser">+ Novo usuário</button></div>
-    <div class="table-wrap"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Veículo padrão</th><th>Status</th></tr></thead><tbody>${rows.map(u=>`<tr><td><b>${escapeHtml(u.nome)}</b></td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.perfil)}</td><td>${escapeHtml(u.veiculo_prefixo||"-")}</td><td>${u.ativo?"Ativo":"Inativo"}</td></tr>`).join("")}</tbody></table></div></section>`;
+    <div class="table-wrap"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Veículo padrão</th><th>Status</th>${isAdmin()?"<th>Ação</th>":""}</tr></thead><tbody>${rows.map(u=>`<tr><td><b>${escapeHtml(u.nome)}</b></td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.perfil)}</td><td>${escapeHtml(u.veiculo_prefixo||"-")}</td><td>${u.ativo?"Ativo":"Inativo"}</td>${isAdmin()?`<td><button class="secondary" data-del-user="${u.id}" data-user-name="${escapeHtml(u.nome)}">🗑 Excluir</button></td>`:""}</tr>`).join("")}</tbody></table></div></section>`;
     $("#novoUser").onclick=()=>modalUsuario(vs);
+    document.querySelectorAll("[data-del-user]").forEach(b=>b.onclick=async()=>{if(!confirm(`Excluir definitivamente o usuário ${b.dataset.userName}?`))return;try{await api(`/api/usuarios/${b.dataset.delUser}`,{method:"DELETE"});loadUsuarios()}catch(e){alert(e.message)}});
   }catch(e){$("#content").innerHTML=`<section class="panel"><h3>Acesso restrito</h3><p>${escapeHtml(e.message)}</p></section>`}
 }
 function modalUsuario(vs){
@@ -845,7 +850,8 @@ async function loadCombustivel(){
       const valid=lista.filter(x=>x.media_km_l!=null).map(x=>Number(x.media_km_l));
       const media=valid.length?(valid.reduce((a,b)=>a+b,0)/valid.length):null;
       $('#fuelResumo').innerHTML=`<div class="cards">${card('Abastecimentos',lista.length,'⛽')}${card('Litros',lista.reduce((a,x)=>a+Number(x.litros||0),0).toLocaleString('pt-BR',{maximumFractionDigits:2})+' L','🛢️')}${card('Média dos registros',media==null?'-':media.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' km/L','📈')}</div>`;
-      $('#fuelBody').innerHTML=lista.map(x=>`<tr><td>${formatarDataBR(x.data)}</td><td><b>${escapeHtml(x.prefixo||'-')}</b></td><td>${escapeHtml(x.placa||'-')}</td><td>${x.km_anterior==null?'-':Number(x.km_anterior).toLocaleString('pt-BR')}</td><td>${Number(x.km||0).toLocaleString('pt-BR')}</td><td>${x.km_rodados==null?'-':Number(x.km_rodados).toLocaleString('pt-BR')}</td><td>${Number(x.litros||0).toLocaleString('pt-BR')} L</td><td><b>${x.media_km_l==null?'-':Number(x.media_km_l).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' km/L'}</b></td><td><button data-edit-fuel="${x.id}" data-km="${x.km}" data-litros="${x.litros}">Editar</button></td></tr>`).join('')||'<tr><td colspan="9">Nenhum abastecimento registrado.</td></tr>';
+      $('#fuelBody').innerHTML=lista.map(x=>`<tr><td>${formatarDataBR(x.data)}</td><td><b>${escapeHtml(x.prefixo||'-')}</b></td><td>${escapeHtml(x.placa||'-')}</td><td>${x.km_anterior==null?'-':Number(x.km_anterior).toLocaleString('pt-BR')}</td><td>${Number(x.km||0).toLocaleString('pt-BR')}</td><td>${x.km_rodados==null?'-':Number(x.km_rodados).toLocaleString('pt-BR')}</td><td>${Number(x.litros||0).toLocaleString('pt-BR')} L</td><td><b>${x.media_km_l==null?'-':Number(x.media_km_l).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' km/L'}</b></td><td><button data-edit-fuel="${x.id}" data-km="${x.km}" data-litros="${x.litros}">Editar</button> ${isAdmin()?`<button data-del-fuel="${x.id}">🗑 Excluir</button>`:""}</td></tr>`).join('')||'<tr><td colspan="9">Nenhum abastecimento registrado.</td></tr>';
+      document.querySelectorAll('[data-del-fuel]').forEach(b=>b.onclick=async()=>{if(!confirm('Excluir definitivamente este abastecimento?'))return;try{await api(`/api/abastecimentos/${b.dataset.delFuel}`,{method:'DELETE'});loadCombustivel()}catch(e){alert(e.message)}});
       document.querySelectorAll('[data-edit-fuel]').forEach(b=>b.onclick=async()=>{const litros=prompt('Litros abastecidos:',b.dataset.litros);if(litros===null)return;const km=prompt('KM do veículo:',b.dataset.km);if(km===null)return;try{await api(`/api/abastecimentos/${b.dataset.editFuel}`,{method:'PUT',body:JSON.stringify({litros:String(litros).replace(',','.'),km:String(km).replace(',','.')})});loadCombustivel()}catch(e){alert(e.message)}});
     };
     $('#content').innerHTML=`<section class="panel"><h2>⛽ Controle de Combustível</h2><p>Histórico de abastecimentos, quilometragem e média de consumo por veículo.</p><label>Filtrar por veículo <select id="fuelFiltro"><option value="">Todos</option>${opts}</select></label></section><div id="fuelResumo" style="margin-top:16px"></div><section class="panel" style="margin-top:16px"><div class="table-wrap"><table><thead><tr><th>Data</th><th>Veículo</th><th>Placa</th><th>KM anterior</th><th>KM atual</th><th>KM rodados</th><th>Litros</th><th>Média</th><th>Ação</th></tr></thead><tbody id="fuelBody"></tbody></table></div></section>`;
@@ -861,9 +867,10 @@ async function loadChamadosAbertos(){
   $("#content").innerHTML=`<div class="cards manut-kpis">${card("Chamados",rows.length,"📨")}${card("Abertos",rows.filter(x=>x.status==="Aberto").length,"⚠️")}${card("Críticos",rows.filter(x=>x.prioridade==="Crítica"&&x.status==="Aberto").length,"🚨")}${card("O.S. geradas",rows.filter(x=>x.ordem_servico_id).length,"📋")}</div>
   <section class="panel" style="margin-top:16px"><h3>📨 Ocorrências enviadas pelos motoristas</h3><div class="table-wrap"><table><thead><tr><th>Chamado</th><th>Data</th><th>Veículo</th><th>Motorista</th><th>Problema</th><th>Local</th><th>Prioridade</th><th>Status</th><th>Ação</th></tr></thead>
   <tbody>${rows.map(x=>`<tr class="${x.prioridade==="Crítica"?"check-problem":""}"><td><b>${escapeHtml(x.numero||"-")}</b></td><td>${new Date(x.criado_em).toLocaleString("pt-BR")}</td><td><b>${escapeHtml(x.prefixo)}</b><br>${escapeHtml(x.placa||"")}</td><td>${escapeHtml(x.motorista||"-")}</td><td><b>${escapeHtml(x.titulo)}</b><br>${escapeHtml(x.descricao)}</td><td>${escapeHtml(x.localizacao||"-")}</td><td>${escapeHtml(x.prioridade)}</td><td>${escapeHtml(x.status)}</td>
-  <td>${!x.ordem_servico_id?`<button class="primary" data-chos="${x.id}">📋 Gerar O.S.</button>`:`<button class="secondary" data-open-os="${x.ordem_servico_id}">Abrir O.S.</button>`}</td></tr>`).join("")}</tbody></table></div></section>`;
+  <td>${!x.ordem_servico_id?`<button class="primary" data-chos="${x.id}">📋 Gerar O.S.</button>`:`<button class="secondary" data-open-os="${x.ordem_servico_id}">Abrir O.S.</button>`} ${isAdmin()?`<button class="secondary" data-del-ch="${x.id}" data-num="${escapeHtml(x.numero||x.id)}">🗑 Excluir</button>`:""}</td></tr>`).join("")}</tbody></table></div></section>`;
   document.querySelectorAll("[data-chos]").forEach(b=>b.onclick=async()=>{if(!confirm("Gerar O.S. a partir deste chamado?"))return;try{const r=await api(`/api/chamados/${b.dataset.chos}/gerar-os`,{method:"POST",body:"{}"});alert(`${r.numero} gerada.`);loadChamadosAbertos()}catch(e){alert(e.message)}});
   document.querySelectorAll("[data-open-os]").forEach(b=>b.onclick=()=>abrirOS(b.dataset.openOs));
+  document.querySelectorAll("[data-del-ch]").forEach(b=>b.onclick=async()=>{if(!confirm(`Excluir definitivamente o chamado ${b.dataset.num}?`))return;try{await api(`/api/chamados/${b.dataset.delCh}`,{method:"DELETE"});loadChamadosAbertos()}catch(e){alert(e.message)}});
  }catch(e){$("#content").innerHTML=`<section class="panel"><h3>Acesso do supervisor</h3><p>${escapeHtml(e.message)}</p></section>`}
 }
 
