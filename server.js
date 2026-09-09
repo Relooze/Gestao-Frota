@@ -253,6 +253,7 @@ async function initDatabase() {
     ALTER TABLE checklists ADD COLUMN IF NOT EXISTS tratado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL;
     ALTER TABLE checklists ADD COLUMN IF NOT EXISTS tratado_em TIMESTAMPTZ;
     ALTER TABLE checklists ADD COLUMN IF NOT EXISTS ordem_servico_id INTEGER;
+    UPDATE checklists SET data_checklist=criado_em::date WHERE data_checklist IS NULL;
   `);
 
 }
@@ -3218,15 +3219,17 @@ app.get("/api/historico-checklists", auth, async (req,res)=>{
 });
 
 
-// V3.5.0 - Histórico do checklist pelo veículo selecionado no dia
+// V3.5.5 - Histórico do checklist do veículo selecionado pelo motorista
 app.get("/api/motorista/historico-checklists-veiculo-dia",auth,somenteMotorista,async(req,res)=>{
   try{
-    const ctx=await pool.query(`SELECT m.veiculo_id,v.prefixo,v.placa,v.modelo
-      FROM motorista_veiculo_dia m JOIN veiculos v ON v.id=m.veiculo_id
-      WHERE m.usuario_id=$1 AND m.data_operacao=CURRENT_DATE
-      ORDER BY m.id DESC LIMIT 1`,[req.user.id]);
-    if(!ctx.rowCount)return res.status(409).json({erro:"SELECIONAR_VEICULO_DIA"});
-    const vid=ctx.rows[0].veiculo_id;
+    const ctx=await pool.query(`SELECT COALESCE(
+        (SELECT veiculo_id FROM motorista_veiculo_dia WHERE usuario_id=$1 AND data_operacao=CURRENT_DATE ORDER BY id DESC LIMIT 1),
+        (SELECT veiculo_id FROM usuarios WHERE id=$1)
+      ) AS veiculo_id`,[req.user.id]);
+    const vid=Number(ctx.rows[0]?.veiculo_id||0);
+    if(!vid)return res.status(409).json({erro:"SELECIONAR_VEICULO_DIA"});
+    const vr=await pool.query(`SELECT id veiculo_id,prefixo,placa,modelo FROM veiculos WHERE id=$1`,[vid]);
+    if(!vr.rowCount)return res.status(404).json({erro:"Veículo selecionado não encontrado."});
     const p=[vid];
     let sql=`SELECT c.*,v.prefixo,v.placa,v.modelo,COALESCE(u.nome,col.nome,'-') AS motorista_nome
       FROM checklists c
@@ -3238,8 +3241,7 @@ app.get("/api/motorista/historico-checklists-veiculo-dia",auth,somenteMotorista,
     if(req.query.data_final){p.push(req.query.data_final);sql+=` AND COALESCE(c.data_checklist,c.criado_em::date)<=$${p.length}::date`;}
     sql+=` ORDER BY COALESCE(c.data_checklist,c.criado_em::date) DESC,c.criado_em DESC,c.id DESC LIMIT 1000`;
     const r=await pool.query(sql,p);
-    // V3.5.1: retorno padronizado e contexto do veículo do dia.
-    res.json({veiculo:ctx.rows[0],rows:Array.isArray(r.rows)?r.rows:[],total:Number(r.rowCount||0)});
+    res.json({veiculo:vr.rows[0],rows:r.rows,total:r.rowCount});
   }catch(e){console.error("historico-checklists-veiculo-dia",e);res.status(500).json({erro:"Erro ao consultar histórico do veículo selecionado."});}
 });
 

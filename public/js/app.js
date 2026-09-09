@@ -763,6 +763,20 @@ async function abrirDetalheOSMotorista(id){
  }catch(e){alert(e.message)}
 }
 
+function dataLocalISO(){
+ const d=new Date();
+ const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),day=String(d.getDate()).padStart(2,"0");
+ return `${y}-${m}-${day}`;
+}
+function formatarDataBR(valor){
+ if(!valor) return "-";
+ const txt=String(valor);
+ const m=txt.match(/^(\d{4})-(\d{2})-(\d{2})/);
+ if(m) return `${m[3]}/${m[2]}/${m[1]}`;
+ const d=new Date(valor);
+ return Number.isNaN(d.getTime()) ? "-" : d.toLocaleDateString("pt-BR");
+}
+
 async function loadSolicitacaoAbastecimento(){
  $("#pageTitle").textContent="Solicitação de Abastecimento";
  const perfil=String(user?.perfil||"").toLowerCase();
@@ -770,13 +784,13 @@ async function loadSolicitacaoAbastecimento(){
   if(perfil==="motorista"){
    const [s,rawRows]=await Promise.all([api("/api/sessao"),api("/api/solicitacoes-abastecimento")]);
    const rows=asRows(rawRows);
-   const hoje=new Date().toISOString().slice(0,10);
+   const hoje=dataLocalISO();
    $("#content").innerHTML=`<section class="panel"><h2>⛽ Solicitar abastecimento</h2><p>Envie a solicitação para o supervisor e administração.</p><form id="formSolicAbast"><div class="modal-grid"><label>Veículo<input value="${escapeHtml(s.veiculo_prefixo||"-")}" disabled></label><label>Placa<input value="${escapeHtml(s.placa||"-")}" disabled></label><label>Data<input name="data_solicitacao" type="date" value="${hoje}" required></label></div><label>Observação<textarea name="observacao" rows="3" placeholder="Informação adicional, se necessário"></textarea></label><div class="actions"><button class="primary">⛽ Enviar solicitação</button></div></form></section>
-   <section class="panel" style="margin-top:16px"><h3>Minhas solicitações</h3><div class="table-wrap"><table><thead><tr><th>Data</th><th>Veículo</th><th>Placa</th><th>Status</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${new Date(x.data_solicitacao+'T12:00:00').toLocaleDateString('pt-BR')}</td><td>${escapeHtml(x.prefixo||'-')}</td><td>${escapeHtml(x.placa||'-')}</td><td><b>${escapeHtml(x.status)}</b></td></tr>`).join('')||'<tr><td colspan="4">Nenhuma solicitação.</td></tr>'}</tbody></table></div></section>`;
+   <section class="panel" style="margin-top:16px"><h3>Minhas solicitações</h3><div class="table-wrap"><table><thead><tr><th>Data</th><th>Veículo</th><th>Placa</th><th>Status</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${formatarDataBR(x.data_solicitacao)}</td><td>${escapeHtml(x.prefixo||'-')}</td><td>${escapeHtml(x.placa||'-')}</td><td><b>${escapeHtml(x.status)}</b></td></tr>`).join('')||'<tr><td colspan="4">Nenhuma solicitação.</td></tr>'}</tbody></table></div></section>`;
    $("#formSolicAbast").onsubmit=async e=>{e.preventDefault();const o=Object.fromEntries(new FormData(e.target));try{const gravada=await api("/api/solicitacoes-abastecimento",{method:"POST",body:JSON.stringify(o)});const id=gravada?.solicitacao?.id;alert(`Solicitação ${id?"#"+id+" ":""}gravada no banco e enviada ao supervisor/administrador.`);loadSolicitacaoAbastecimento()}catch(x){alert(x.message)}};
   }else{
    const rows=asRows(await api("/api/solicitacoes-abastecimento?hoje=1"));
-   $("#content").innerHTML=`<section class="panel"><h2>⛽ Solicitações de abastecimento</h2><p><b>${rows.length}</b> registrada(s) • <b>${rows.filter(x=>String(x.status).toLowerCase()==='pendente').length}</b> pendente(s).</p><div class="actions"><button class="secondary" id="refreshAbast">🔄 Atualizar solicitações</button></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Hora</th><th>Motorista</th><th>Veículo</th><th>Placa</th><th>Status</th><th>Ação</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${x.data_solicitacao?new Date(x.data_solicitacao+'T12:00:00').toLocaleDateString('pt-BR'):'-'}</td><td>${x.criado_em?new Date(x.criado_em).toLocaleTimeString('pt-BR'):'-'}</td><td>${escapeHtml(x.motorista||'-')}</td><td><b>${escapeHtml(x.prefixo||'-')}</b></td><td>${escapeHtml(x.placa||'-')}</td><td><b>${escapeHtml(x.status||'-')}</b></td><td><select data-abast-status="${x.id}"><option ${x.status==='Pendente'?'selected':''}>Pendente</option><option ${x.status==='Autorizado'?'selected':''}>Autorizado</option><option ${x.status==='Atendido'?'selected':''}>Atendido</option><option ${x.status==='Recusado'?'selected':''}>Recusado</option></select></td></tr>`).join('')||'<tr><td colspan="7">Nenhuma solicitação registrada no banco.</td></tr>'}</tbody></table></div></section>`;
+   $("#content").innerHTML=`<section class="panel"><h2>⛽ Solicitações de abastecimento</h2><p><b>${rows.length}</b> registrada(s) • <b>${rows.filter(x=>String(x.status).toLowerCase()==='pendente').length}</b> pendente(s).</p><div class="actions"><button class="secondary" id="refreshAbast">🔄 Atualizar solicitações</button></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Hora</th><th>Motorista</th><th>Veículo</th><th>Placa</th><th>Status</th><th>Ação</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${x.data_solicitacao?formatarDataBR(x.data_solicitacao):'-'}</td><td>${x.criado_em?new Date(x.criado_em).toLocaleTimeString('pt-BR'):'-'}</td><td>${escapeHtml(x.motorista||'-')}</td><td><b>${escapeHtml(x.prefixo||'-')}</b></td><td>${escapeHtml(x.placa||'-')}</td><td><b>${escapeHtml(x.status||'-')}</b></td><td><select data-abast-status="${x.id}"><option ${x.status==='Pendente'?'selected':''}>Pendente</option><option ${x.status==='Autorizado'?'selected':''}>Autorizado</option><option ${x.status==='Atendido'?'selected':''}>Atendido</option><option ${x.status==='Recusado'?'selected':''}>Recusado</option></select></td></tr>`).join('')||'<tr><td colspan="7">Nenhuma solicitação registrada no banco.</td></tr>'}</tbody></table></div></section>`;
    document.querySelectorAll('[data-abast-status]').forEach(x=>x.onchange=async()=>{try{await api(`/api/solicitacoes-abastecimento/${x.dataset.abastStatus}/status`,{method:'PUT',body:JSON.stringify({status:x.value})});loadSolicitacaoAbastecimento()}catch(e){alert(e.message)}});
    const refreshAbast=$("#refreshAbast"); if(refreshAbast) refreshAbast.onclick=()=>loadSolicitacaoAbastecimento();
   }
