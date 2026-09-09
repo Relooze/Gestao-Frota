@@ -71,6 +71,7 @@ $("#nav").onclick=e=>{
   else if(b.dataset.page==="abertura-chamado") loadAberturaChamado();
   else if(b.dataset.page==="minhas-os") loadMinhasOS();
   else if(b.dataset.page==="solicitacao-abastecimento") loadSolicitacaoAbastecimento();
+  else if(b.dataset.page==="abastecimentos") loadCombustivel();
   else if(b.dataset.page==="chamados-abertos") loadChamadosAbertos();
   else if(b.dataset.page==="perfil-motorista") loadPerfilMotorista();
   else loadList(b.dataset.page,b.textContent.trim());
@@ -125,11 +126,11 @@ async function loadDashboard(){
     const d=await api("/api/dashboard-operacional"),r=d.resumo||{};
     const dinheiro=n=>Number(n||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
     const gastos=(d.ranking_gastos||[]).map((x,i)=>`<tr><td>${i+1}º</td><td><b>${escapeHtml(x.prefixo)}</b><br><small>${escapeHtml(x.placa||"")}</small></td><td><b>${dinheiro(x.total)}</b></td></tr>`).join("");
-    const combust=(d.ranking_combustivel||[]).map((x,i)=>`<tr><td>${i+1}º</td><td><b>${escapeHtml(x.prefixo)}</b><br><small>${escapeHtml(x.placa||"")}</small></td><td>${Number(x.litros||0).toLocaleString("pt-BR")} L</td><td>${dinheiro(x.valor)}</td></tr>`).join("");
+    const combust=(d.ranking_combustivel||[]).map((x,i)=>`<tr><td>${i+1}º</td><td><b>${escapeHtml(x.prefixo)}</b><br><small>${escapeHtml(x.placa||"")}</small></td><td><b>${x.media_km_l!=null?Number(x.media_km_l).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+" km/L":"-"}</b></td><td>${Number(x.litros||0).toLocaleString("pt-BR")} L</td></tr>`).join("");
     const frota=(d.veiculos||[]).map(v=>`<tr><td><b>${escapeHtml(v.prefixo)}</b></td><td>${escapeHtml(v.placa||"-")}</td><td>${escapeHtml(v.modelo||"-")}</td><td><span class="dash-status ${v.status_operacional==='Em rota'?'rota':v.status_operacional==='Manutenção'?'manut':'parado'}">${escapeHtml(v.status_operacional)}</span></td><td>${v.checklist_hoje?'✅ Feito':'⚠️ Pendente'}</td><td>${v.os_abertas||0}</td><td>${v.chamados_abertos||0}</td></tr>`).join("");
     $("#content").innerHTML=`<div class="cards">${card("Total da frota",r.total,"🚚")}${card("Em rota",r.em_rota,"🟢")}${card("Parados",r.parados,"⏸")}${card("Checklist feito hoje",r.checklist_feito,"☑")}${card("O.S. abertas",r.os_abertas,"🔧")}${card("Chamados abertos",r.chamados_abertos,"🆘")}</div>
       <div class="grid2" style="margin-top:16px"><section class="panel"><h3>🏆 Ranking de gastos — mês atual</h3><div class="table-wrap"><table><thead><tr><th>#</th><th>Veículo</th><th>Gasto</th></tr></thead><tbody>${gastos||'<tr><td colspan="3">Sem gastos registrados neste mês.</td></tr>'}</tbody></table></div></section>
-      <section class="panel"><h3>⛽ Ranking de combustível — mês atual</h3><div class="table-wrap"><table><thead><tr><th>#</th><th>Veículo</th><th>Litros</th><th>Valor</th></tr></thead><tbody>${combust||'<tr><td colspan="4">Sem abastecimentos registrados neste mês.</td></tr>'}</tbody></table></div></section></div>
+      <section class="panel"><h3>⛽ Ranking de consumo — melhor média no mês</h3><div class="table-wrap"><table><thead><tr><th>#</th><th>Veículo</th><th>Média</th><th>Litros</th></tr></thead><tbody>${combust||'<tr><td colspan="4">Sem abastecimentos com média calculada neste mês.</td></tr>'}</tbody></table></div></section></div>
       <section class="panel" style="margin-top:16px"><h3>🚛 Situação diária da frota</h3><p>Status operacional, checklist e pendências por veículo.</p><div class="table-wrap"><table><thead><tr><th>Veículo</th><th>Placa</th><th>Modelo</th><th>Status</th><th>Checklist hoje</th><th>O.S.</th><th>Chamados</th></tr></thead><tbody>${frota}</tbody></table></div></section>`;
   }catch(e){$("#content").innerHTML=`<section class="panel"><h3>Dashboard</h3><p>${escapeHtml(e.message)}</p></section>`}
 }
@@ -786,8 +787,13 @@ async function loadSolicitacaoAbastecimento(){
    const rows=asRows(rawRows);
    const hoje=dataLocalISO();
    $("#content").innerHTML=`<section class="panel"><h2>⛽ Solicitar abastecimento</h2><p>Envie a solicitação para o supervisor e administração.</p><form id="formSolicAbast"><div class="modal-grid"><label>Veículo<input value="${escapeHtml(s.veiculo_prefixo||"-")}" disabled></label><label>Placa<input value="${escapeHtml(s.placa||"-")}" disabled></label><label>Data<input name="data_solicitacao" type="date" value="${hoje}" required></label></div><label>Observação<textarea name="observacao" rows="3" placeholder="Informação adicional, se necessário"></textarea></label><div class="actions"><button class="primary">⛽ Enviar solicitação</button></div></form></section>
-   <section class="panel" style="margin-top:16px"><h3>Minhas solicitações</h3><div class="table-wrap"><table><thead><tr><th>Data</th><th>Veículo</th><th>Placa</th><th>Status</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${formatarDataBR(x.data_solicitacao)}</td><td>${escapeHtml(x.prefixo||'-')}</td><td>${escapeHtml(x.placa||'-')}</td><td><b>${escapeHtml(x.status)}</b></td></tr>`).join('')||'<tr><td colspan="4">Nenhuma solicitação.</td></tr>'}</tbody></table></div></section>`;
+   <section class="panel" style="margin-top:16px"><h3>Minhas solicitações</h3><div class="table-wrap"><table><thead><tr><th>Data</th><th>Veículo</th><th>Placa</th><th>Status</th><th>Ação</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${formatarDataBR(x.data_solicitacao)}</td><td>${escapeHtml(x.prefixo||'-')}</td><td>${escapeHtml(x.placa||'-')}</td><td><b>${escapeHtml(x.status)}</b></td><td>${x.status==='Autorizado'?`<button class="primary" data-registrar-abast="${x.id}">Registrar abastecimento</button>`:(x.status==='Atendido'?'✅ Registrado':'-')}</td></tr>`).join('')||'<tr><td colspan="5">Nenhuma solicitação.</td></tr>'}</tbody></table></div></section>`;
    $("#formSolicAbast").onsubmit=async e=>{e.preventDefault();const o=Object.fromEntries(new FormData(e.target));try{const gravada=await api("/api/solicitacoes-abastecimento",{method:"POST",body:JSON.stringify(o)});const id=gravada?.solicitacao?.id;alert(`Solicitação ${id?"#"+id+" ":""}gravada no banco e enviada ao supervisor/administrador.`);loadSolicitacaoAbastecimento()}catch(x){alert(x.message)}};
+   document.querySelectorAll('[data-registrar-abast]').forEach(btn=>btn.onclick=async()=>{
+     const litros=prompt('Litros abastecidos:'); if(litros===null)return;
+     const km=prompt('KM atual do veículo:'); if(km===null)return;
+     try{await api(`/api/solicitacoes-abastecimento/${btn.dataset.registrarAbast}/registrar`,{method:'POST',body:JSON.stringify({litros:String(litros).replace(',','.'),km:String(km).replace(',','.')})});alert('Abastecimento registrado. Consumo atualizado.');loadSolicitacaoAbastecimento()}catch(e){alert(e.message)}
+   });
   }else{
    const rows=asRows(await api("/api/solicitacoes-abastecimento?hoje=1"));
    $("#content").innerHTML=`<section class="panel"><h2>⛽ Solicitações de abastecimento</h2><p><b>${rows.length}</b> registrada(s) • <b>${rows.filter(x=>String(x.status).toLowerCase()==='pendente').length}</b> pendente(s).</p><div class="actions"><button class="secondary" id="refreshAbast">🔄 Atualizar solicitações</button></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Hora</th><th>Motorista</th><th>Veículo</th><th>Placa</th><th>Status</th><th>Ação</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${x.data_solicitacao?formatarDataBR(x.data_solicitacao):'-'}</td><td>${x.criado_em?new Date(x.criado_em).toLocaleTimeString('pt-BR'):'-'}</td><td>${escapeHtml(x.motorista||'-')}</td><td><b>${escapeHtml(x.prefixo||'-')}</b></td><td>${escapeHtml(x.placa||'-')}</td><td><b>${escapeHtml(x.status||'-')}</b></td><td><select data-abast-status="${x.id}"><option ${x.status==='Pendente'?'selected':''}>Pendente</option><option ${x.status==='Autorizado'?'selected':''}>Autorizado</option><option ${x.status==='Atendido'?'selected':''}>Atendido</option><option ${x.status==='Recusado'?'selected':''}>Recusado</option></select></td></tr>`).join('')||'<tr><td colspan="7">Nenhuma solicitação registrada no banco.</td></tr>'}</tbody></table></div></section>`;
@@ -826,6 +832,26 @@ async function loadSolicitacaoAbastecimento(){
    const refreshAbast=$("#refreshAbast"); if(refreshAbast) refreshAbast.onclick=()=>loadSolicitacaoAbastecimento();
   }
  }catch(e){$("#content").innerHTML=`<section class="panel"><p>${escapeHtml(e.message)}</p></section>`}
+}
+
+
+async function loadCombustivel(){
+  $('#pageTitle').textContent='Combustível';
+  try{
+    const [raw,vs]=await Promise.all([api('/api/abastecimentos-detalhados'),api('/api/veiculos')]);
+    const rows=asRows(raw), veiculos=asRows(vs);
+    const opts=veiculos.filter(v=>String(v.status||'').toLowerCase()!=='inativo').map(v=>`<option value="${v.id}">${escapeHtml(v.prefixo)} • ${escapeHtml(v.placa||'-')}</option>`).join('');
+    const render=(lista)=>{
+      const valid=lista.filter(x=>x.media_km_l!=null).map(x=>Number(x.media_km_l));
+      const media=valid.length?(valid.reduce((a,b)=>a+b,0)/valid.length):null;
+      $('#fuelResumo').innerHTML=`<div class="cards">${card('Abastecimentos',lista.length,'⛽')}${card('Litros',lista.reduce((a,x)=>a+Number(x.litros||0),0).toLocaleString('pt-BR',{maximumFractionDigits:2})+' L','🛢️')}${card('Média dos registros',media==null?'-':media.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' km/L','📈')}</div>`;
+      $('#fuelBody').innerHTML=lista.map(x=>`<tr><td>${formatarDataBR(x.data)}</td><td><b>${escapeHtml(x.prefixo||'-')}</b></td><td>${escapeHtml(x.placa||'-')}</td><td>${x.km_anterior==null?'-':Number(x.km_anterior).toLocaleString('pt-BR')}</td><td>${Number(x.km||0).toLocaleString('pt-BR')}</td><td>${x.km_rodados==null?'-':Number(x.km_rodados).toLocaleString('pt-BR')}</td><td>${Number(x.litros||0).toLocaleString('pt-BR')} L</td><td><b>${x.media_km_l==null?'-':Number(x.media_km_l).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' km/L'}</b></td><td><button data-edit-fuel="${x.id}" data-km="${x.km}" data-litros="${x.litros}">Editar</button></td></tr>`).join('')||'<tr><td colspan="9">Nenhum abastecimento registrado.</td></tr>';
+      document.querySelectorAll('[data-edit-fuel]').forEach(b=>b.onclick=async()=>{const litros=prompt('Litros abastecidos:',b.dataset.litros);if(litros===null)return;const km=prompt('KM do veículo:',b.dataset.km);if(km===null)return;try{await api(`/api/abastecimentos/${b.dataset.editFuel}`,{method:'PUT',body:JSON.stringify({litros:String(litros).replace(',','.'),km:String(km).replace(',','.')})});loadCombustivel()}catch(e){alert(e.message)}});
+    };
+    $('#content').innerHTML=`<section class="panel"><h2>⛽ Controle de Combustível</h2><p>Histórico de abastecimentos, quilometragem e média de consumo por veículo.</p><label>Filtrar por veículo <select id="fuelFiltro"><option value="">Todos</option>${opts}</select></label></section><div id="fuelResumo" style="margin-top:16px"></div><section class="panel" style="margin-top:16px"><div class="table-wrap"><table><thead><tr><th>Data</th><th>Veículo</th><th>Placa</th><th>KM anterior</th><th>KM atual</th><th>KM rodados</th><th>Litros</th><th>Média</th><th>Ação</th></tr></thead><tbody id="fuelBody"></tbody></table></div></section>`;
+    render(rows);
+    $('#fuelFiltro').onchange=e=>render(e.target.value?rows.filter(x=>String(x.veiculo_id)===e.target.value):rows);
+  }catch(e){$('#content').innerHTML=`<section class="panel"><h3>Combustível</h3><p>${escapeHtml(e.message)}</p></section>`}
 }
 
 async function loadChamadosAbertos(){

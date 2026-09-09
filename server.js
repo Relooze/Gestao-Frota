@@ -3069,10 +3069,11 @@ app.get("/api/dashboard-operacional",auth,async(req,res)=>{
           AND COALESCE(m.data_emissao,m.data_abertura,m.criado_em::date)<(date_trunc('month',CURRENT_DATE)+interval '1 month')::date
         GROUP BY v.id,v.prefixo,v.placa ORDER BY total DESC LIMIT 10`),
       pool.query(`SELECT v.id,v.prefixo,v.placa,ROUND(SUM(COALESCE(a.litros,0))::numeric,2) litros,
-        ROUND(SUM(COALESCE(a.valor_total,a.litros*a.valor_litro,0))::numeric,2) valor,COUNT(*)::int abastecimentos
+        ROUND(SUM(COALESCE(a.valor_total,a.litros*a.valor_litro,0))::numeric,2) valor,COUNT(*)::int abastecimentos,
+        ROUND((SUM(COALESCE(a.km_rodados,0))/NULLIF(SUM(CASE WHEN a.km_rodados IS NOT NULL THEN a.litros ELSE 0 END),0))::numeric,2) media_km_l
         FROM abastecimentos a JOIN veiculos v ON v.id=a.veiculo_id
         WHERE LOWER(TRIM(COALESCE(v.status,'')))<>'inativo' AND a.data>=date_trunc('month',CURRENT_DATE)::date AND a.data<(date_trunc('month',CURRENT_DATE)+interval '1 month')::date
-        GROUP BY v.id,v.prefixo,v.placa ORDER BY litros DESC LIMIT 10`),
+        GROUP BY v.id,v.prefixo,v.placa ORDER BY media_km_l DESC NULLS LAST,litros DESC LIMIT 10`),
       pool.query(`SELECT
         (SELECT COUNT(*)::int FROM veiculos WHERE LOWER(TRIM(COALESCE(status,'')))<>'inativo') total,
         (SELECT COUNT(*)::int FROM veiculos v WHERE LOWER(TRIM(COALESCE(v.status,'')))<>'inativo' AND (EXISTS(SELECT 1 FROM motorista_veiculo_dia md WHERE md.veiculo_id=v.id AND md.data_operacao=CURRENT_DATE) OR LOWER(COALESCE(v.status,''))='em rota')) em_rota,
@@ -3351,6 +3352,76 @@ app.put("/api/solicitacoes-abastecimento/:id/status",auth,exigirSenhaAtualizada,
   }catch(e){console.error("PUT solicitacoes-abastecimento",e);res.status(500).json({erro:"Erro ao atualizar solicitação."});}
 });
 
+
+// V3.7.0 - Fechamento do abastecimento, consumo e edição
+async function garantirControleConsumoV370(){
+  await garantirTabelaSolicitacoesAbastecimento();
+  await pool.query(`ALTER TABLE abastecimentos ADD COLUMN IF NOT EXISTS solicitacao_id INTEGER REFERENCES solicitacoes_abastecimento(id) ON DELETE SET NULL`);
+  await pool.query(`ALTER TABLE abastecimentos ADD COLUMN IF NOT EXISTS usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL`);
+  await pool.query(`ALTER TABLE abastecimentos ADD COLUMN IF NOT EXISTS km_anterior NUMERIC(12,1)`);
+  await pool.query(`ALTER TABLE abastecimentos ADD COLUMN IF NOT EXISTS km_rodados NUMERIC(12,1)`);
+  await pool.query(`ALTER TABLE abastecimentos ADD COLUMN IF NOT EXISTS media_km_l NUMERIC(12,3)`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS ux_abastecimentos_solicitacao ON abastecimentos(solicitacao_id) WHERE solicitacao_id IS NOT NULL`);
+}
+
+app.post('/api/solicitacoes-abastecimento/:id/registrar',auth,exigirSenhaAtualizada,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    await garantirControleConsumoV370();
+    const id=Number(req.params.id), litros=Number(req.body.litros), km=Number(req.body.km);
+    if(!(litros>0)||!(km>=0)) return res.status(400).json({erro:'Informe litros e KM válidos.'});
+    await client.query('BEGIN');
+    const sol=await client.query(`SELECT s.*,v.prefixo,v.placa FROM solicitacoes_abastecimento s LEFT JOIN veiculos v ON v.id=s.veiculo_id WHERE s.id=$1 FOR UPDATE`,[id]);
+    if(!sol.rowCount){await client.query('ROLLBACK');return res.status(404).json({erro:'Solicitação não encontrada.'});}
+    const x=sol.rows[0], perfil=String(req.user.perfil||'').toLowerCase();
+    if(perfil==='motorista' && Number(x.usuario_id)!==Number(req.user.id)){await client.query('ROLLBACK');return res.status(403).json({erro:'Esta solicitação não pertence ao motorista logado.'});}
+    if(!['motorista','admin','administrador','supervisor'].includes(perfil)){await client.query('ROLLBACK');return res.status(403).json({erro:'Acesso não permitido.'});}
+    if(String(x.status)!=='Autorizado'){await client.query('ROLLBACK');return res.status(400).json({erro:'O abastecimento precisa estar Autorizado antes do lançamento.'});}
+    const ja=await client.query('SELECT id FROM abastecimentos WHERE solicitacao_id=$1',[id]);
+    if(ja.rowCount){await client.query('ROLLBACK');return res.status(409).json({erro:'Este abastecimento já foi registrado.'});}
+    const ant=await client.query(`SELECT km FROM abastecimentos WHERE veiculo_id=$1 AND km IS NOT NULL ORDER BY data DESC,criado_em DESC,id DESC LIMIT 1`,[x.veiculo_id]);
+    const kmAnterior=ant.rowCount?Number(ant.rows[0].km):null;
+    const kmRodados=kmAnterior!==null && km>=kmAnterior ? km-kmAnterior : null;
+    const media=kmRodados!==null && litros>0 ? kmRodados/litros : null;
+    const ins=await client.query(`INSERT INTO abastecimentos(veiculo_id,data,km,litros,valor_litro,valor_total,posto,solicitacao_id,usuario_id,km_anterior,km_rodados,media_km_l)
+      VALUES($1,CURRENT_DATE,$2,$3,0,0,NULL,$4,$5,$6,$7,$8) RETURNING *`,[x.veiculo_id,km,litros,id,req.user.id,kmAnterior,kmRodados,media]);
+    await client.query(`UPDATE solicitacoes_abastecimento SET status='Atendido',atendido_em=NOW() WHERE id=$1`,[id]);
+    await client.query(`UPDATE veiculos SET km_atual=GREATEST(COALESCE(km_atual,0),$1) WHERE id=$2`,[km,x.veiculo_id]);
+    await client.query('COMMIT');
+    res.status(201).json({sucesso:true,abastecimento:ins.rows[0]});
+  }catch(e){try{await client.query('ROLLBACK')}catch{} console.error('registrar abastecimento',e);res.status(500).json({erro:'Erro ao registrar abastecimento.'});}
+  finally{client.release()}
+});
+
+app.get('/api/abastecimentos-detalhados',auth,exigirSenhaAtualizada,async(req,res)=>{
+  try{
+    await garantirControleConsumoV370();
+    const perfil=String(req.user.perfil||'').toLowerCase();
+    if(!['admin','administrador','supervisor'].includes(perfil)) return res.status(403).json({erro:'Acesso restrito.'});
+    const args=[]; let where=' WHERE 1=1';
+    if(req.query.veiculo_id){args.push(Number(req.query.veiculo_id));where+=` AND a.veiculo_id=$${args.length}`;}
+    const r=await pool.query(`SELECT a.*,v.prefixo,v.placa,v.modelo,u.nome motorista FROM abastecimentos a LEFT JOIN veiculos v ON v.id=a.veiculo_id LEFT JOIN usuarios u ON u.id=a.usuario_id ${where} ORDER BY a.data DESC,a.criado_em DESC,a.id DESC LIMIT 1000`,args);
+    res.json({rows:r.rows,total:r.rowCount});
+  }catch(e){console.error('abastecimentos-detalhados',e);res.status(500).json({erro:'Erro ao consultar abastecimentos.'});}
+});
+
+app.put('/api/abastecimentos/:id',auth,exigirSenhaAtualizada,somenteAdminSupervisor,async(req,res)=>{
+  try{
+    await garantirControleConsumoV370();
+    const id=Number(req.params.id), litros=Number(req.body.litros), km=Number(req.body.km);
+    if(!(litros>0)||!(km>=0)) return res.status(400).json({erro:'Informe litros e KM válidos.'});
+    const atual=await pool.query('SELECT * FROM abastecimentos WHERE id=$1',[id]);
+    if(!atual.rowCount) return res.status(404).json({erro:'Abastecimento não encontrado.'});
+    const a=atual.rows[0];
+    const ant=await pool.query(`SELECT km FROM abastecimentos WHERE veiculo_id=$1 AND id<>$2 AND (data<$3 OR (data=$3 AND id<$2)) AND km IS NOT NULL ORDER BY data DESC,id DESC LIMIT 1`,[a.veiculo_id,id,a.data]);
+    const kmAnterior=ant.rowCount?Number(ant.rows[0].km):null;
+    const kmRodados=kmAnterior!==null && km>=kmAnterior?km-kmAnterior:null;
+    const media=kmRodados!==null?kmRodados/litros:null;
+    const r=await pool.query(`UPDATE abastecimentos SET km=$1,litros=$2,km_anterior=$3,km_rodados=$4,media_km_l=$5 WHERE id=$6 RETURNING *`,[km,litros,kmAnterior,kmRodados,media,id]);
+    res.json({sucesso:true,abastecimento:r.rows[0]});
+  }catch(e){console.error('editar abastecimento',e);res.status(500).json({erro:'Erro ao editar abastecimento.'});}
+});
+
 // V3.5.4 - IMPORTANTE: o fallback da SPA deve vir DEPOIS de todas as rotas /api.
 // Antes ele interceptava GET/POST de /api/solicitacoes-abastecimento e devolvia index.html,
 // impedindo motorista, supervisor e administrador de enxergarem a mesma solicitação persistida.
@@ -3364,5 +3435,6 @@ initDatabase()
   .then(importarHistoricoManutencaoV23)
   .then(importarHistoricoFrotaV3)
   .then(importarHistorico5041V241)
+  .then(garantirControleConsumoV370)
   .then(() => app.listen(PORT, "0.0.0.0", () => console.log(`Gestão-Frota online na porta ${PORT}`)))
   .catch(err => { console.error("Falha ao iniciar banco:", err); process.exit(1); });
