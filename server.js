@@ -3245,46 +3245,73 @@ app.get("/api/motorista/historico-checklists-veiculo-dia",auth,somenteMotorista,
   }catch(e){console.error("historico-checklists-veiculo-dia",e);res.status(500).json({erro:"Erro ao consultar histórico do veículo selecionado."});}
 });
 
-// V3.4.6 - Solicitações de abastecimento
+// V3.5.3 - Solicitações de abastecimento (persistência e consulta unificadas)
+async function garantirTabelaSolicitacoesAbastecimento(){
+  await pool.query(`CREATE TABLE IF NOT EXISTS solicitacoes_abastecimento (
+    id SERIAL PRIMARY KEY,
+    usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    veiculo_id INTEGER REFERENCES veiculos(id) ON DELETE SET NULL,
+    placa VARCHAR(30),
+    data_solicitacao DATE NOT NULL DEFAULT CURRENT_DATE,
+    status VARCHAR(30) NOT NULL DEFAULT 'Pendente',
+    observacao TEXT,
+    atendido_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    atendido_em TIMESTAMPTZ,
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
+}
+
 app.post("/api/solicitacoes-abastecimento",auth,exigirSenhaAtualizada,async(req,res)=>{
   try{
-    const perfil=String(req.user?.perfil||"").toLowerCase();
+    await garantirTabelaSolicitacoesAbastecimento();
+    const perfil=String(req.user?.perfil||"").trim().toLowerCase();
     let vid=Number(req.body.veiculo_id||0);
     if(perfil==="motorista"){
-      const q=await pool.query(`SELECT COALESCE((SELECT veiculo_id FROM motorista_veiculo_dia WHERE usuario_id=$1 AND data_operacao=CURRENT_DATE),(SELECT veiculo_id FROM usuarios WHERE id=$1)) veiculo_id`,[req.user.id]);
+      const q=await pool.query(`SELECT veiculo_id FROM motorista_veiculo_dia WHERE usuario_id=$1 AND data_operacao=CURRENT_DATE ORDER BY id DESC LIMIT 1`,[req.user.id]);
       vid=Number(q.rows[0]?.veiculo_id||0);
     }
-    if(!vid)return res.status(400).json({erro:"Selecione o veículo do dia antes de solicitar abastecimento."});
-    const v=await pool.query("SELECT placa FROM veiculos WHERE id=$1",[vid]);
-    if(!v.rowCount)return res.status(404).json({erro:"Veículo não encontrado."});
-    const data=req.body.data_solicitacao||new Date().toISOString().slice(0,10);
-    const r=await pool.query(`INSERT INTO solicitacoes_abastecimento(usuario_id,veiculo_id,placa,data_solicitacao,status,observacao) VALUES($1,$2,$3,$4,'Pendente',$5) RETURNING *`,[req.user.id,vid,v.rows[0].placa||req.body.placa||"",data,String(req.body.observacao||"")]);
-    res.status(201).json(r.rows[0]);
-  }catch(e){console.error(e);res.status(500).json({erro:"Erro ao solicitar abastecimento."});}
+    if(!vid) return res.status(400).json({erro:"Selecione o veículo do dia antes de solicitar abastecimento."});
+    const v=await pool.query("SELECT id,prefixo,placa FROM veiculos WHERE id=$1",[vid]);
+    if(!v.rowCount) return res.status(404).json({erro:"Veículo não encontrado."});
+    // A data operacional é definida pelo servidor para evitar divergência de navegador/fuso.
+    const r=await pool.query(`INSERT INTO solicitacoes_abastecimento(usuario_id,veiculo_id,placa,data_solicitacao,status,observacao)
+      VALUES($1,$2,$3,CURRENT_DATE,'Pendente',$4) RETURNING id,usuario_id,veiculo_id,placa,data_solicitacao,status,observacao,criado_em`,
+      [req.user.id,vid,v.rows[0].placa||"",String(req.body.observacao||"")]);
+    const row=r.rows[0];
+    console.log(`[ABASTECIMENTO] solicitação #${row.id} gravada usuario=${req.user.id} veiculo=${vid}`);
+    res.status(201).json({sucesso:true,solicitacao:{...row,prefixo:v.rows[0].prefixo}});
+  }catch(e){console.error("POST solicitacoes-abastecimento",e);res.status(500).json({erro:"Erro ao gravar solicitação de abastecimento."});}
 });
+
 app.get("/api/solicitacoes-abastecimento",auth,exigirSenhaAtualizada,async(req,res)=>{
   try{
-    const perfil=String(req.user?.perfil||"").trim().toLowerCase(); const p=[];
-    let sql=`SELECT s.*,v.prefixo,v.modelo,u.nome motorista,a.nome atendido_por_nome
+    await garantirTabelaSolicitacoesAbastecimento();
+    const perfil=String(req.user?.perfil||"").trim().toLowerCase();
+    const p=[];
+    let sql=`SELECT s.id,s.usuario_id,s.veiculo_id,s.placa,s.data_solicitacao,s.status,s.observacao,s.atendido_em,s.criado_em,
+      v.prefixo,v.modelo,u.nome AS motorista,a.nome AS atendido_por_nome
       FROM solicitacoes_abastecimento s
       LEFT JOIN veiculos v ON v.id=s.veiculo_id
       LEFT JOIN usuarios u ON u.id=s.usuario_id
       LEFT JOIN usuarios a ON a.id=s.atendido_por WHERE 1=1`;
     if(perfil==="motorista"){p.push(req.user.id);sql+=` AND s.usuario_id=$${p.length}`;}
     else if(!["admin","administrador","supervisor"].includes(perfil)) return res.status(403).json({erro:"Acesso não permitido."});
-    // V3.5.2: gestão enxerga todo o histórico. O filtro visual destaca pendências,
-    // mas nenhuma solicitação desaparece por diferença de data/status legado.
-    // Motorista continua restrito às próprias solicitações.
-    if(req.query.hoje==="1" && perfil==="motorista") sql+=` AND s.data_solicitacao=CURRENT_DATE`;
-    sql+=` ORDER BY CASE WHEN s.status='Pendente' THEN 0 WHEN s.status='Autorizado' THEN 1 ELSE 2 END,s.criado_em DESC`;
+    sql+=` ORDER BY s.criado_em DESC,s.id DESC`;
     const r=await pool.query(sql,p);
-    res.json({rows:r.rows,total:r.rowCount,perfil});
-  }catch(e){console.error("solicitacoes-abastecimento GET",e);res.status(500).json({erro:"Erro ao consultar solicitações de abastecimento."});}
+    res.json({sucesso:true,rows:Array.isArray(r.rows)?r.rows:[],total:Number(r.rowCount||0),perfil});
+  }catch(e){console.error("GET solicitacoes-abastecimento",e);res.status(500).json({erro:"Erro ao consultar solicitações de abastecimento."});}
 });
+
 app.put("/api/solicitacoes-abastecimento/:id/status",auth,exigirSenhaAtualizada,somenteAdminSupervisor,async(req,res)=>{
-  const st=String(req.body.status||""); if(!["Pendente","Autorizado","Atendido","Recusado"].includes(st))return res.status(400).json({erro:"Status inválido."});
-  const r=await pool.query(`UPDATE solicitacoes_abastecimento SET status=$1,atendido_por=$2,atendido_em=CASE WHEN $1 IN ('Atendido','Recusado') THEN NOW() ELSE atendido_em END WHERE id=$3 RETURNING *`,[st,req.user.id,req.params.id]);
-  if(!r.rowCount)return res.status(404).json({erro:"Solicitação não encontrada."}); res.json(r.rows[0]);
+  try{
+    await garantirTabelaSolicitacoesAbastecimento();
+    const st=String(req.body.status||"");
+    if(!["Pendente","Autorizado","Atendido","Recusado"].includes(st)) return res.status(400).json({erro:"Status inválido."});
+    const r=await pool.query(`UPDATE solicitacoes_abastecimento SET status=$1,atendido_por=$2,
+      atendido_em=CASE WHEN $1 IN ('Atendido','Recusado') THEN NOW() ELSE NULL END WHERE id=$3 RETURNING *`,[st,req.user.id,req.params.id]);
+    if(!r.rowCount) return res.status(404).json({erro:"Solicitação não encontrada."});
+    res.json({sucesso:true,solicitacao:r.rows[0]});
+  }catch(e){console.error("PUT solicitacoes-abastecimento",e);res.status(500).json({erro:"Erro ao atualizar solicitação."});}
 });
 
 initDatabase()
