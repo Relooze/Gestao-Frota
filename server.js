@@ -3062,21 +3062,21 @@ app.get("/api/dashboard-operacional",auth,async(req,res)=>{
         EXISTS(SELECT 1 FROM checklists c WHERE c.veiculo_id=v.id AND c.criado_em::date=CURRENT_DATE) checklist_hoje,
         (SELECT COUNT(*)::int FROM ordens_servico o WHERE o.veiculo_id=v.id AND LOWER(COALESCE(o.status,'')) NOT IN ('concluída','concluida','finalizada','fechada','cancelada','cancelado')) os_abertas,
         (SELECT COUNT(*)::int FROM chamados c WHERE c.veiculo_id=v.id AND LOWER(COALESCE(c.status,'')) NOT IN ('concluído','concluido','concluída','concluida','finalizado','fechado','cancelado','cancelada')) chamados_abertos
-        FROM veiculos v ORDER BY v.prefixo`),
+        FROM veiculos v WHERE LOWER(TRIM(COALESCE(v.status,'')))<>'inativo' ORDER BY v.prefixo`),
       pool.query(`SELECT v.id,v.prefixo,v.placa,ROUND(SUM(COALESCE(m.custo,0))::numeric,2) total
         FROM manutencoes m JOIN veiculos v ON v.id=m.veiculo_id
-        WHERE COALESCE(m.data_emissao,m.data_abertura,m.criado_em::date)>=date_trunc('month',CURRENT_DATE)::date
+        WHERE LOWER(TRIM(COALESCE(v.status,'')))<>'inativo' AND COALESCE(m.data_emissao,m.data_abertura,m.criado_em::date)>=date_trunc('month',CURRENT_DATE)::date
           AND COALESCE(m.data_emissao,m.data_abertura,m.criado_em::date)<(date_trunc('month',CURRENT_DATE)+interval '1 month')::date
         GROUP BY v.id,v.prefixo,v.placa ORDER BY total DESC LIMIT 10`),
       pool.query(`SELECT v.id,v.prefixo,v.placa,ROUND(SUM(COALESCE(a.litros,0))::numeric,2) litros,
         ROUND(SUM(COALESCE(a.valor_total,a.litros*a.valor_litro,0))::numeric,2) valor,COUNT(*)::int abastecimentos
         FROM abastecimentos a JOIN veiculos v ON v.id=a.veiculo_id
-        WHERE a.data>=date_trunc('month',CURRENT_DATE)::date AND a.data<(date_trunc('month',CURRENT_DATE)+interval '1 month')::date
+        WHERE LOWER(TRIM(COALESCE(v.status,'')))<>'inativo' AND a.data>=date_trunc('month',CURRENT_DATE)::date AND a.data<(date_trunc('month',CURRENT_DATE)+interval '1 month')::date
         GROUP BY v.id,v.prefixo,v.placa ORDER BY litros DESC LIMIT 10`),
       pool.query(`SELECT
-        (SELECT COUNT(*)::int FROM veiculos) total,
-        (SELECT COUNT(*)::int FROM veiculos v WHERE EXISTS(SELECT 1 FROM motorista_veiculo_dia md WHERE md.veiculo_id=v.id AND md.data_operacao=CURRENT_DATE) OR LOWER(COALESCE(v.status,''))='em rota') em_rota,
-        (SELECT COUNT(*)::int FROM veiculos v WHERE LOWER(COALESCE(v.status,''))<>'manutenção' AND NOT EXISTS(SELECT 1 FROM motorista_veiculo_dia md WHERE md.veiculo_id=v.id AND md.data_operacao=CURRENT_DATE) AND LOWER(COALESCE(v.status,''))<>'em rota') parados,
+        (SELECT COUNT(*)::int FROM veiculos WHERE LOWER(TRIM(COALESCE(status,'')))<>'inativo') total,
+        (SELECT COUNT(*)::int FROM veiculos v WHERE LOWER(TRIM(COALESCE(v.status,'')))<>'inativo' AND (EXISTS(SELECT 1 FROM motorista_veiculo_dia md WHERE md.veiculo_id=v.id AND md.data_operacao=CURRENT_DATE) OR LOWER(COALESCE(v.status,''))='em rota')) em_rota,
+        (SELECT COUNT(*)::int FROM veiculos v WHERE LOWER(TRIM(COALESCE(v.status,'')))<>'inativo' AND LOWER(COALESCE(v.status,''))<>'manutenção' AND NOT EXISTS(SELECT 1 FROM motorista_veiculo_dia md WHERE md.veiculo_id=v.id AND md.data_operacao=CURRENT_DATE) AND LOWER(COALESCE(v.status,''))<>'em rota') parados,
         (SELECT COUNT(DISTINCT veiculo_id)::int FROM checklists WHERE criado_em::date=CURRENT_DATE) checklist_feito,
         (SELECT COUNT(*)::int FROM ordens_servico WHERE LOWER(COALESCE(status,'')) NOT IN ('concluída','concluida','finalizada','fechada','cancelada','cancelado')) os_abertas,
         (SELECT COUNT(*)::int FROM chamados WHERE LOWER(COALESCE(status,'')) NOT IN ('concluído','concluido','concluída','concluida','finalizado','fechado','cancelado','cancelada')) chamados_abertos`)
