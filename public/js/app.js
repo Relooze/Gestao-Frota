@@ -817,7 +817,7 @@ async function loadSolicitacaoAbastecimento(){
            '',
            'Favor realizar o abastecimento do veículo acima.'
          ].join('\n');
-         const wa=`https://wa.me/5584998946047?text=${encodeURIComponent(msg)}`;
+         const wa=`https://wa.me/5584991044202?text=${encodeURIComponent(msg)}`;
          window.open(wa,'_blank','noopener,noreferrer');
        }
        loadSolicitacaoAbastecimento();

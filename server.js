@@ -3259,6 +3259,16 @@ async function garantirTabelaSolicitacoesAbastecimento(){
     atendido_em TIMESTAMPTZ,
     criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`);
+  // Migra bancos de versões anteriores sem apagar solicitações existentes.
+  await pool.query(`ALTER TABLE solicitacoes_abastecimento ADD COLUMN IF NOT EXISTS usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL`);
+  await pool.query(`ALTER TABLE solicitacoes_abastecimento ADD COLUMN IF NOT EXISTS veiculo_id INTEGER REFERENCES veiculos(id) ON DELETE SET NULL`);
+  await pool.query(`ALTER TABLE solicitacoes_abastecimento ADD COLUMN IF NOT EXISTS placa VARCHAR(30)`);
+  await pool.query(`ALTER TABLE solicitacoes_abastecimento ADD COLUMN IF NOT EXISTS data_solicitacao DATE DEFAULT CURRENT_DATE`);
+  await pool.query(`ALTER TABLE solicitacoes_abastecimento ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'Pendente'`);
+  await pool.query(`ALTER TABLE solicitacoes_abastecimento ADD COLUMN IF NOT EXISTS observacao TEXT`);
+  await pool.query(`ALTER TABLE solicitacoes_abastecimento ADD COLUMN IF NOT EXISTS atendido_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL`);
+  await pool.query(`ALTER TABLE solicitacoes_abastecimento ADD COLUMN IF NOT EXISTS atendido_em TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE solicitacoes_abastecimento ADD COLUMN IF NOT EXISTS criado_em TIMESTAMPTZ DEFAULT NOW()`);
 }
 
 app.post("/api/solicitacoes-abastecimento",auth,exigirSenhaAtualizada,async(req,res)=>{
@@ -3307,8 +3317,10 @@ app.put("/api/solicitacoes-abastecimento/:id/status",auth,exigirSenhaAtualizada,
     await garantirTabelaSolicitacoesAbastecimento();
     const st=String(req.body.status||"");
     if(!["Pendente","Autorizado","Atendido","Recusado"].includes(st)) return res.status(400).json({erro:"Status inválido."});
-    const r=await pool.query(`UPDATE solicitacoes_abastecimento SET status=$1,atendido_por=$2,
-      atendido_em=CASE WHEN $1 IN ('Atendido','Recusado') THEN NOW() ELSE NULL END WHERE id=$3 RETURNING *`,[st,req.user.id,req.params.id]);
+    const r=await pool.query(`UPDATE solicitacoes_abastecimento SET status=$1,
+      atendido_por=CASE WHEN $1='Pendente' THEN NULL ELSE $2 END,
+      atendido_em=CASE WHEN $1='Pendente' THEN NULL ELSE NOW() END
+      WHERE id=$3 RETURNING *`,[st,req.user.id,req.params.id]);
     if(!r.rowCount) return res.status(404).json({erro:"Solicitação não encontrada."});
     res.json({sucesso:true,solicitacao:r.rows[0]});
   }catch(e){console.error("PUT solicitacoes-abastecimento",e);res.status(500).json({erro:"Erro ao atualizar solicitação."});}
