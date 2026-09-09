@@ -497,12 +497,13 @@ async function loadManutencaoCategoria(categoria="CAMINHAO"){
       <section class="panel manut-filtros">
         <div class="filter-grid"><label>Data inicial<input id="manInicio" type="date"></label><label>Data final<input id="manFim" type="date"></label>
         <label>Empresa<input id="manEmpresa" placeholder="Filtrar empresa"></label><label>Serviço / sistema<input id="manServico" placeholder="Ex.: Motor, Elétrico"></label>
-        <button class="primary" id="aplicarMan">Aplicar filtros</button><button class="secondary" id="limparMan">Limpar</button></div>
+        <button class="primary" id="aplicarMan">Aplicar filtros</button><button class="secondary" id="imprimirMan">🖨 Imprimir relatório</button><button class="secondary" id="limparMan">Limpar</button></div>
       </section>
       <div id="manDashboard"></div>`;
     window.__manutPrefixo="";
     document.querySelectorAll(".vehicle-chip").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll(".vehicle-chip").forEach(x=>x.classList.remove("active"));b.classList.add("active");window.__manutPrefixo=String(b.getAttribute("data-prefixo")||"").trim();await carregarPainelManutencao();}));
     $("#aplicarMan").onclick=carregarPainelManutencao;
+    $("#imprimirMan").onclick=imprimirRelatorioManutencao;
     $("#limparMan").onclick=()=>{$("#manInicio").value="";$("#manFim").value="";$("#manEmpresa").value="";$("#manServico").value="";carregarPainelManutencao()};
     $("#novaManut").onclick=modalNovaManutencao;
     await carregarPainelManutencao();
@@ -530,6 +531,12 @@ async function carregarPainelManutencao(){
   });
 
   const total=hist.reduce((s,x)=>s+Number(x.custo||0),0);
+  window.__manutRelatorioAtual={
+    historico:hist, total, prefixo, veiculoInfo:null,
+    inicio:$("#manInicio")?.value||"", fim:$("#manFim")?.value||"",
+    empresa:$("#manEmpresa")?.value||"", servico:$("#manServico")?.value||"",
+    categoria:window.__manutCategoria||"CAMINHAO"
+  };
   const countBy=(key)=>Object.entries(hist.reduce((o,x)=>{
     const k=String(x[key]||"Não informado").trim()||"Não informado";
     o[k]=(o[k]||0)+1; return o;
@@ -538,6 +545,7 @@ async function carregarPainelManutencao(){
   const serv=countBy("sistema"), empRank=countBy("empresa");
   const maxS=Math.max(1,...serv.map(x=>x[1])),maxE=Math.max(1,...empRank.map(x=>x[1]));
   const veiculoInfo=(window.__manutVeiculos||[]).find(v=>String(v.prefixo)===prefixo);
+  if(window.__manutRelatorioAtual) window.__manutRelatorioAtual.veiculoInfo=veiculoInfo||null;
 
   $("#manDashboard").innerHTML=`
     ${prefixo?`<section class="panel selected-vehicle">
@@ -591,6 +599,33 @@ async function carregarPainelManutencao(){
     }catch(e){ alert(e.message||"Erro ao excluir serviço realizado."); }
   });
 }
+
+function imprimirRelatorioManutencao(){
+  const r=window.__manutRelatorioAtual;
+  if(!r){ alert("Aplique os filtros antes de imprimir o relatório."); return; }
+  const hist=r.historico||[];
+  const total=Number(r.total||0);
+  const info=r.veiculoInfo||{};
+  const periodo=(r.inicio||r.fim)?`${r.inicio?formatarDataBR(r.inicio):"Início"} até ${r.fim?formatarDataBR(r.fim):"Hoje"}`:"Todos os períodos";
+  const ticket=hist.length?total/hist.length:0;
+  const countBy=(key)=>Object.entries(hist.reduce((o,x)=>{const k=String(x[key]||"Não informado").trim()||"Não informado";o[k]=(o[k]||0)+1;return o;},{})).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const serv=countBy("sistema"), empresas=countBy("empresa");
+  const moeda=n=>Number(n||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const w=window.open("","_blank");
+  if(!w){alert("O navegador bloqueou a janela de impressão. Permita pop-ups para este site.");return;}
+  const doc=`<!doctype html><html><head><meta charset="utf-8"><title>Relatório de Manutenção ${escapeHtml(r.prefixo||"Frota")}</title><style>
+  body{font-family:Arial,sans-serif;color:#111;margin:24px;font-size:11px}h1{margin:0;font-size:22px}h2{font-size:15px;margin:20px 0 8px}.head{display:flex;justify-content:space-between;border-bottom:2px solid #172554;padding-bottom:12px}.meta,.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0}.box{border:1px solid #ccd5e1;border-radius:7px;padding:9px}.label{font-size:9px;color:#64748b;text-transform:uppercase}.value{font-weight:700;font-size:13px;margin-top:3px}table{width:100%;border-collapse:collapse;margin-top:8px}th,td{border:1px solid #d7dee8;padding:6px;text-align:left;vertical-align:top}th{background:#f1f5f9;font-size:9px}.money{text-align:right;white-space:nowrap}.filters{background:#f8fafc;border:1px solid #d7dee8;padding:9px;border-radius:7px;margin:12px 0}.rank{display:grid;grid-template-columns:1fr 1fr;gap:14px}.rankbox{border:1px solid #d7dee8;padding:10px;border-radius:7px}.footer{margin-top:18px;text-align:center;color:#64748b;font-size:9px}.no-print{margin-bottom:12px}@media print{.no-print{display:none}body{margin:8mm}}
+  </style></head><body><div class="no-print"><button onclick="window.print()">🖨 Imprimir</button></div>
+  <div class="head"><div><h1>RELATÓRIO DE MANUTENÇÃO</h1><b>FROTA & EXPEDIÇÃO</b></div><div style="text-align:right"><b>${r.prefixo?`Veículo ${escapeHtml(r.prefixo)}`:"Frota completa"}</b><br>Emissão: ${new Date().toLocaleString("pt-BR")}</div></div>
+  <div class="filters"><b>Filtros aplicados:</b> Período: ${escapeHtml(periodo)} • Empresa: ${escapeHtml(r.empresa||"Todas")} • Serviço/Sistema: ${escapeHtml(r.servico||"Todos")}</div>
+  ${r.prefixo?`<div class="meta"><div class="box"><div class="label">Veículo</div><div class="value">${escapeHtml(r.prefixo)}</div></div><div class="box"><div class="label">Placa/ID</div><div class="value">${escapeHtml(info.placa||"-")}</div></div><div class="box"><div class="label">Modelo</div><div class="value">${escapeHtml(info.modelo||"-")}</div></div><div class="box"><div class="label">Tipo</div><div class="value">${escapeHtml(info.tipo||"-")}</div></div></div>`:""}
+  <div class="kpis"><div class="box"><div class="label">Gasto no período</div><div class="value">R$ ${moeda(total)}</div></div><div class="box"><div class="label">Registros</div><div class="value">${hist.length}</div></div><div class="box"><div class="label">Ticket médio</div><div class="value">R$ ${moeda(ticket)}</div></div><div class="box"><div class="label">Veículo</div><div class="value">${escapeHtml(r.prefixo||"Todos")}</div></div></div>
+  <div class="rank"><div class="rankbox"><b>Serviços mais realizados</b>${serv.length?`<ol>${serv.map(([n,v])=>`<li>${escapeHtml(n)} — ${v}</li>`).join("")}</ol>`:"<p>Sem dados.</p>"}</div><div class="rankbox"><b>Empresas mais utilizadas</b>${empresas.length?`<ol>${empresas.map(([n,v])=>`<li>${escapeHtml(n)} — ${v}</li>`).join("")}</ol>`:"<p>Sem dados.</p>"}</div></div>
+  <h2>Histórico do período</h2>${hist.length?`<table><thead><tr><th>Data</th><th>Veículo</th><th>Serviço</th><th>Sistema</th><th>Descrição / item executado</th><th>Empresa</th><th>NF</th><th>Local</th><th>Valor</th></tr></thead><tbody>${hist.map(x=>`<tr><td>${formatarDataBR(x.data_emissao||x.data_abertura)}</td><td><b>${fmt(x.prefixo||x.veiculo_prefixo)}</b></td><td>${fmt(x.servico||x.tipo)}</td><td>${fmt(x.sistema)}</td><td>${escapeHtml(x.produto||x.descricao||"-")}</td><td>${fmt(x.empresa)}</td><td>${fmt(x.nota_fiscal)}</td><td>${fmt(x.local)}</td><td class="money">R$ ${moeda(x.custo)}</td></tr>`).join("")}</tbody></table>`:"<p>Nenhum registro encontrado com os filtros selecionados.</p>"}
+  <div class="footer">Relatório gerado pelo sistema Gestão de Frota & Expedição</div><script>setTimeout(()=>window.print(),350)<\/script></body></html>`;
+  w.document.open();w.document.write(doc);w.document.close();
+}
+
 function modalNovaManutencao(){
   const opts=(window.__manutVeiculos||[]).map(v=>`<option>${escapeHtml(v.prefixo)}</option>`).join("");
   document.body.insertAdjacentHTML("beforeend",`<div class="modal-bg" id="modalMan"><form class="modal" id="formMan"><div class="tire-modal-head"><h2>🛠 Registrar manutenção</h2><button type="button" class="secondary" id="xMan">✕</button></div>
