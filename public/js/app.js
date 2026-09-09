@@ -581,6 +581,15 @@ async function carregarPainelManutencao(){
       </tr>`).join("")}</tbody></table></div>`:
       `<div class="empty-history"><b>Nenhuma manutenção encontrada para o veículo ${escapeHtml(prefixo||"selecionado")}.</b><br>Altere o período ou limpe os filtros.</div>`}
     </section>`;
+
+  // V3.7.4 - ativa exclusão dos serviços exibidos no histórico
+  document.querySelectorAll("[data-del-manut]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Excluir definitivamente este serviço realizado?")) return;
+    try{
+      await api(`/api/manutencoes/${b.dataset.delManut}`,{method:"DELETE"});
+      await carregarPainelManutencao();
+    }catch(e){ alert(e.message||"Erro ao excluir serviço realizado."); }
+  });
 }
 function modalNovaManutencao(){
   const opts=(window.__manutVeiculos||[]).map(v=>`<option>${escapeHtml(v.prefixo)}</option>`).join("");
@@ -844,19 +853,26 @@ async function loadCombustivel(){
   $('#pageTitle').textContent='Combustível';
   try{
     const [raw,vs]=await Promise.all([api('/api/abastecimentos-detalhados'),api('/api/veiculos')]);
-    const rows=asRows(raw), veiculos=asRows(vs);
-    const opts=veiculos.filter(v=>String(v.status||'').toLowerCase()!=='inativo').map(v=>`<option value="${v.id}">${escapeHtml(v.prefixo)} • ${escapeHtml(v.placa||'-')}</option>`).join('');
+    let rows=asRows(raw), veiculos=asRows(vs).filter(v=>String(v.status||'').toLowerCase()!=='inativo');
+    let selecionado='';
+    const registrosPorVeiculo={};
+    rows.forEach(x=>{const k=String(x.veiculo_id||'');registrosPorVeiculo[k]=(registrosPorVeiculo[k]||0)+1});
+
     const render=(lista)=>{
-      const valid=lista.filter(x=>x.media_km_l!=null).map(x=>Number(x.media_km_l));
+      const valid=lista.filter(x=>x.media_km_l!=null && Number(x.media_km_l)>=0).map(x=>Number(x.media_km_l));
       const media=valid.length?(valid.reduce((a,b)=>a+b,0)/valid.length):null;
-      $('#fuelResumo').innerHTML=`<div class="cards">${card('Abastecimentos',lista.length,'⛽')}${card('Litros',lista.reduce((a,x)=>a+Number(x.litros||0),0).toLocaleString('pt-BR',{maximumFractionDigits:2})+' L','🛢️')}${card('Média dos registros',media==null?'-':media.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' km/L','📈')}</div>`;
-      $('#fuelBody').innerHTML=lista.map(x=>`<tr><td>${formatarDataBR(x.data)}</td><td><b>${escapeHtml(x.prefixo||'-')}</b></td><td>${escapeHtml(x.placa||'-')}</td><td>${x.km_anterior==null?'-':Number(x.km_anterior).toLocaleString('pt-BR')}</td><td>${Number(x.km||0).toLocaleString('pt-BR')}</td><td>${x.km_rodados==null?'-':Number(x.km_rodados).toLocaleString('pt-BR')}</td><td>${Number(x.litros||0).toLocaleString('pt-BR')} L</td><td><b>${x.media_km_l==null?'-':Number(x.media_km_l).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' km/L'}</b></td><td><button data-edit-fuel="${x.id}" data-km="${x.km}" data-litros="${x.litros}">Editar</button> ${isAdmin()?`<button data-del-fuel="${x.id}">🗑 Excluir</button>`:""}</td></tr>`).join('')||'<tr><td colspan="9">Nenhum abastecimento registrado.</td></tr>';
-      document.querySelectorAll('[data-del-fuel]').forEach(b=>b.onclick=async()=>{if(!confirm('Excluir definitivamente este abastecimento?'))return;try{await api(`/api/abastecimentos/${b.dataset.delFuel}`,{method:'DELETE'});loadCombustivel()}catch(e){alert(e.message)}});
-      document.querySelectorAll('[data-edit-fuel]').forEach(b=>b.onclick=async()=>{const litros=prompt('Litros abastecidos:',b.dataset.litros);if(litros===null)return;const km=prompt('KM do veículo:',b.dataset.km);if(km===null)return;try{await api(`/api/abastecimentos/${b.dataset.editFuel}`,{method:'PUT',body:JSON.stringify({litros:String(litros).replace(',','.'),km:String(km).replace(',','.')})});loadCombustivel()}catch(e){alert(e.message)}});
+      const kmRodados=lista.reduce((a,x)=>a+Number(x.km_rodados||0),0);
+      $('#fuelResumo').innerHTML=`<div class="cards">${card('Abastecimentos',lista.length,'⛽')}${card('Litros',lista.reduce((a,x)=>a+Number(x.litros||0),0).toLocaleString('pt-BR',{maximumFractionDigits:2})+' L','🛢️')}${card('KM rodados',kmRodados.toLocaleString('pt-BR',{maximumFractionDigits:0})+' km','🚚')}${card('Média dos registros',media==null?'-':media.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' km/L','📈')}</div>`;
+      $('#fuelBody').innerHTML=lista.map(x=>`<tr><td>${formatarDataBR(x.data)}</td><td><b>${escapeHtml(x.prefixo||'-')}</b></td><td>${escapeHtml(x.placa||'-')}</td><td>${x.km_anterior==null?'-':Number(x.km_anterior).toLocaleString('pt-BR')}</td><td>${Number(x.km||0).toLocaleString('pt-BR')}</td><td>${x.km_rodados==null?'-':Number(x.km_rodados).toLocaleString('pt-BR')}</td><td>${Number(x.litros||0).toLocaleString('pt-BR')} L</td><td><b>${x.media_km_l==null?'-':Number(x.media_km_l).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' km/L'}</b></td><td><button data-edit-fuel="${x.id}" data-km="${x.km}" data-litros="${x.litros}">Editar</button> ${isAdmin()?`<button data-del-fuel="${x.id}">🗑 Excluir</button>`:""}</td></tr>`).join('')||'<tr><td colspan="9">Nenhum abastecimento registrado para este veículo.</td></tr>';
+      document.querySelectorAll('[data-del-fuel]').forEach(b=>b.onclick=async()=>{if(!confirm('Excluir definitivamente este abastecimento?'))return;try{await api(`/api/abastecimentos/${b.dataset.delFuel}`,{method:'DELETE'});await loadCombustivel()}catch(e){alert(e.message)}});
+      document.querySelectorAll('[data-edit-fuel]').forEach(b=>b.onclick=async()=>{const litros=prompt('Litros abastecidos:',b.dataset.litros);if(litros===null)return;const km=prompt('KM do veículo:',b.dataset.km);if(km===null)return;try{await api(`/api/abastecimentos/${b.dataset.editFuel}`,{method:'PUT',body:JSON.stringify({litros:String(litros).replace(',','.'),km:String(km).replace(',','.')})});await api('/api/abastecimentos/recalcular-medias',{method:'POST',body:JSON.stringify({veiculo_id:selecionado||null})});await loadCombustivel()}catch(e){alert(e.message)}});
     };
-    $('#content').innerHTML=`<section class="panel"><h2>⛽ Controle de Combustível</h2><p>Histórico de abastecimentos, quilometragem e média de consumo por veículo.</p><label>Filtrar por veículo <select id="fuelFiltro"><option value="">Todos</option>${opts}</select></label></section><div id="fuelResumo" style="margin-top:16px"></div><section class="panel" style="margin-top:16px"><div class="table-wrap"><table><thead><tr><th>Data</th><th>Veículo</th><th>Placa</th><th>KM anterior</th><th>KM atual</th><th>KM rodados</th><th>Litros</th><th>Média</th><th>Ação</th></tr></thead><tbody id="fuelBody"></tbody></table></div></section>`;
+    const chips=veiculos.map(v=>`<button type="button" class="vehicle-chip" data-fuel-id="${v.id}">${escapeHtml(String(v.prefixo))}<small>${registrosPorVeiculo[String(v.id)]||0} registros</small></button>`).join('');
+    $('#content').innerHTML=`<section class="panel"><div class="os-head"><div><h2>⛽ Controle de Combustível</h2><p>Clique no veículo para visualizar o consumo e o histórico individual.</p></div>${['admin','supervisor'].includes(String(currentUser?.perfil||'').toLowerCase())?'<button class="secondary" id="fuelRecalcular">🔄 Atualizar média</button>':''}</div><div class="vehicle-chips"><button type="button" class="vehicle-chip active" data-fuel-id="">TODOS<small>${rows.length} registros</small></button>${chips}</div></section><div id="fuelResumo" style="margin-top:16px"></div><section class="panel" style="margin-top:16px"><div class="table-wrap"><table><thead><tr><th>Data</th><th>Veículo</th><th>Placa</th><th>KM anterior</th><th>KM atual</th><th>KM rodados</th><th>Litros</th><th>Média</th><th>Ação</th></tr></thead><tbody id="fuelBody"></tbody></table></div></section>`;
+    const aplicar=()=>render(selecionado?rows.filter(x=>String(x.veiculo_id)===String(selecionado)):rows);
+    document.querySelectorAll('[data-fuel-id]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-fuel-id]').forEach(x=>x.classList.remove('active'));b.classList.add('active');selecionado=String(b.dataset.fuelId||'');aplicar()});
+    if($('#fuelRecalcular')) $('#fuelRecalcular').onclick=async()=>{try{await api('/api/abastecimentos/recalcular-medias',{method:'POST',body:JSON.stringify({veiculo_id:selecionado||null})});alert(selecionado?'Média do veículo atualizada com sucesso.':'Médias da frota atualizadas com sucesso.');await loadCombustivel();}catch(e){alert(e.message||'Erro ao atualizar médias.')}};
     render(rows);
-    $('#fuelFiltro').onchange=e=>render(e.target.value?rows.filter(x=>String(x.veiculo_id)===e.target.value):rows);
   }catch(e){$('#content').innerHTML=`<section class="panel"><h3>Combustível</h3><p>${escapeHtml(e.message)}</p></section>`}
 }
 

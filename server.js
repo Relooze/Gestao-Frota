@@ -3473,6 +3473,30 @@ app.post('/api/solicitacoes-abastecimento/:id/registrar',auth,exigirSenhaAtualiz
   }
 });
 
+// V3.7.4 - recalcula a sequência de consumo por veículo.
+// O primeiro abastecimento de cada veículo fica sem média por não existir KM anterior.
+app.post('/api/abastecimentos/recalcular-medias',auth,exigirSenhaAtualizada,somenteAdminSupervisor,async(req,res)=>{
+  const c=await pool.connect();
+  try{
+    await garantirControleConsumoV370();
+    const veiculoId=req.body?.veiculo_id?Number(req.body.veiculo_id):null;
+    await c.query('BEGIN');
+    const args=[]; let where='WHERE km IS NOT NULL AND litros IS NOT NULL';
+    if(veiculoId){args.push(veiculoId);where+=` AND veiculo_id=$${args.length}`;}
+    const r=await c.query(`SELECT id,veiculo_id,km,litros,data,criado_em FROM abastecimentos ${where} ORDER BY veiculo_id,data,criado_em,id`,args);
+    const anterior=new Map();
+    for(const a of r.rows){
+      const key=String(a.veiculo_id); const km=Number(a.km), litros=Number(a.litros); const prev=anterior.get(key);
+      let rodados=null,media=null;
+      if(prev!=null && Number.isFinite(km) && km>=prev){rodados=km-prev;if(litros>0)media=rodados/litros;}
+      await c.query('UPDATE abastecimentos SET km_anterior=$1,km_rodados=$2,media_km_l=$3 WHERE id=$4',[prev??null,rodados,media,a.id]);
+      if(Number.isFinite(km)) anterior.set(key,km);
+    }
+    await c.query('COMMIT'); res.json({sucesso:true,registros:r.rowCount});
+  }catch(e){await c.query('ROLLBACK');console.error('recalcular medias',e);res.status(500).json({erro:'Erro ao atualizar médias de combustível.'});}
+  finally{c.release();}
+});
+
 app.get('/api/abastecimentos-detalhados',auth,exigirSenhaAtualizada,async(req,res)=>{
   try{
     await garantirControleConsumoV370();
