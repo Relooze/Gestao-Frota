@@ -185,6 +185,7 @@ async function initDatabase() {
 
 
     ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS veiculo_id INTEGER REFERENCES veiculos(id) ON DELETE SET NULL;
+    ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS loja_vinculada VARCHAR(30);
 
     CREATE TABLE IF NOT EXISTS checklists (
       id SERIAL PRIMARY KEY,
@@ -2179,8 +2180,8 @@ app.post("/api/login", async (req, res) => {
     return res.status(401).json({ erro: "E-mail ou senha inválidos." });
 
   const u = r.rows[0];
-  const token = jwt.sign({ id: u.id, nome: u.nome, email: u.email, perfil: u.perfil }, JWT_SECRET, { expiresIn: "8h" });
-  res.json({ token, usuario: { id: u.id, nome: u.nome, email: u.email, perfil: u.perfil } });
+  const token = jwt.sign({ id: u.id, nome: u.nome, email: u.email, perfil: u.perfil, loja_vinculada: u.loja_vinculada || null }, JWT_SECRET, { expiresIn: "8h" });
+  res.json({ token, usuario: { id: u.id, nome: u.nome, email: u.email, perfil: u.perfil, loja_vinculada: u.loja_vinculada || null } });
 });
 
 app.get("/api/me", auth, (req, res) => res.json(req.user));
@@ -2717,34 +2718,35 @@ function somenteAdminSupervisor(req,res,next){
 }
 
 app.get("/api/usuarios",auth,somenteAdminSupervisor,async(req,res)=>{
-  const r=await pool.query(`SELECT u.id,u.nome,u.email,u.perfil,u.ativo,u.veiculo_id,v.prefixo veiculo_prefixo,v.placa
+  const r=await pool.query(`SELECT u.id,u.nome,u.email,u.perfil,u.ativo,u.veiculo_id,u.loja_vinculada,v.prefixo veiculo_prefixo,v.placa
     FROM usuarios u LEFT JOIN veiculos v ON v.id=u.veiculo_id ORDER BY u.nome`);
   res.json(r.rows);
 });
 
 app.post("/api/usuarios",auth,somenteAdminSupervisor,async(req,res)=>{
   try{
-    const {nome,email,perfil,veiculo_id}=req.body;
+    const {nome,email,perfil,veiculo_id,loja_vinculada}=req.body;
     const senha="1234";
     if(!nome||!email)return res.status(400).json({erro:"Nome e e-mail são obrigatórios."});
     if(!["admin","supervisor","motorista","loja"].includes(perfil))return res.status(400).json({erro:"Perfil inválido."});
+    if(perfil==="loja" && !LOJAS_AUDITORIA.includes(loja_vinculada)) return res.status(400).json({erro:"Selecione a loja vinculada ao usuário."});
     const hash=await bcrypt.hash(senha,12);
-    const r=await pool.query(`INSERT INTO usuarios(nome,email,senha_hash,perfil,veiculo_id,primeiro_acesso)
-      VALUES($1,$2,$3,$4,$5,TRUE) RETURNING id,nome,email,perfil,ativo,veiculo_id,primeiro_acesso`,
-      [nome.trim(),email.trim().toLowerCase(),hash,perfil,veiculo_id||null]);
+    const r=await pool.query(`INSERT INTO usuarios(nome,email,senha_hash,perfil,veiculo_id,loja_vinculada,primeiro_acesso)
+      VALUES($1,$2,$3,$4,$5,$6,TRUE) RETURNING id,nome,email,perfil,ativo,veiculo_id,loja_vinculada,primeiro_acesso`,
+      [nome.trim(),email.trim().toLowerCase(),hash,perfil,veiculo_id||null,perfil==='loja'?loja_vinculada:null]);
     res.status(201).json(r.rows[0]);
   }catch(e){res.status(400).json({erro:e.code==="23505"?"E-mail já cadastrado.":e.message})}
 });
 
 app.put("/api/usuarios/:id",auth,somenteAdminSupervisor,async(req,res)=>{
-  const {nome,email,perfil,ativo,veiculo_id,senha}=req.body;
+  const {nome,email,perfil,ativo,veiculo_id,senha,loja_vinculada}=req.body;
   if(senha){
     const hash=await bcrypt.hash(senha,12);
-    await pool.query(`UPDATE usuarios SET nome=$1,email=$2,perfil=$3,ativo=$4,veiculo_id=$5,senha_hash=$6 WHERE id=$7`,
-      [nome,email,perfil,ativo!==false,veiculo_id||null,hash,req.params.id]);
+    await pool.query(`UPDATE usuarios SET nome=$1,email=$2,perfil=$3,ativo=$4,veiculo_id=$5,loja_vinculada=$6,senha_hash=$7 WHERE id=$8`,
+      [nome,email,perfil,ativo!==false,veiculo_id||null,perfil==='loja'?loja_vinculada:null,hash,req.params.id]);
   }else{
-    await pool.query(`UPDATE usuarios SET nome=$1,email=$2,perfil=$3,ativo=$4,veiculo_id=$5 WHERE id=$6`,
-      [nome,email,perfil,ativo!==false,veiculo_id||null,req.params.id]);
+    await pool.query(`UPDATE usuarios SET nome=$1,email=$2,perfil=$3,ativo=$4,veiculo_id=$5,loja_vinculada=$6 WHERE id=$7`,
+      [nome,email,perfil,ativo!==false,veiculo_id||null,perfil==='loja'?loja_vinculada:null,req.params.id]);
   }
   res.json({sucesso:true});
 });
@@ -3570,10 +3572,20 @@ app.post('/api/auditoria/checklists',auth,async(req,res)=>{
   try{
     await garantirAuditoriaLojasV380();
     if(!podeAuditar(req)) return res.status(403).json({erro:'Acesso não permitido.'});
-    const {loja,responsavel,itens}=req.body||{};
+    let {loja,responsavel,itens}=req.body||{};
+    if(perfilAuditoria(req)==='loja'){
+      const ur=await pool.query('SELECT loja_vinculada FROM usuarios WHERE id=$1',[req.user.id]);
+      loja=ur.rows[0]?.loja_vinculada||null;
+      if(!loja) return res.status(400).json({erro:'Seu usuário não possui loja vinculada. Solicite ao administrador.'});
+    }
     if(!LOJAS_AUDITORIA.includes(loja)) return res.status(400).json({erro:'Selecione uma loja válida.'});
     if(!Array.isArray(itens)||!itens.length) return res.status(400).json({erro:'Checklist sem itens.'});
-    for(const x of itens){if(!Number.isInteger(Number(x.nota))||Number(x.nota)<1||Number(x.nota)>5)return res.status(400).json({erro:'Todos os itens precisam de nota de 1 a 5.'});if(!x.foto)return res.status(400).json({erro:'Anexe uma foto em cada item do checklist.'});}
+    for(const x of itens){
+      const nota=Number(x.nota);
+      if(!Number.isInteger(nota)||nota<1||nota>5)return res.status(400).json({erro:'Todos os itens precisam de nota de 1 a 5.'});
+      if(nota<=2 && !x.foto)return res.status(400).json({erro:'Itens com nota 1 ou 2 exigem foto da não conformidade.'});
+      if(nota<=2 && !String(x.observacao||'').trim())return res.status(400).json({erro:'Itens com nota 1 ou 2 exigem observação da não conformidade.'});
+    }
     const media=itens.reduce((s,x)=>s+Number(x.nota),0)/itens.length;
     const r=await pool.query(`INSERT INTO auditorias_loja(loja,usuario_id,auditor,responsavel,data_auditoria,itens,nota_geral) VALUES($1,$2,$3,$4,CURRENT_DATE,$5::jsonb,$6) RETURNING *`,[loja,req.user.id,req.user.nome||'',responsavel||'',JSON.stringify(itens),media]);
     res.json({sucesso:true,auditoria:r.rows[0]});
@@ -3587,7 +3599,7 @@ app.get('/api/auditoria/checklists',auth,async(req,res)=>{
     if(req.query.loja){p.push(req.query.loja);w+=` AND a.loja=$${p.length}`}
     if(req.query.inicio){p.push(req.query.inicio);w+=` AND a.data_auditoria >= $${p.length}`}
     if(req.query.fim){p.push(req.query.fim);w+=` AND a.data_auditoria <= $${p.length}`}
-    if(perfilAuditoria(req)==='loja'){p.push(req.user.id);w+=` AND a.usuario_id=$${p.length}`}
+    if(perfilAuditoria(req)==='loja'){const ur=await pool.query('SELECT loja_vinculada FROM usuarios WHERE id=$1',[req.user.id]);const lv=ur.rows[0]?.loja_vinculada;if(!lv)return res.json({rows:[],total:0});p.push(lv);w+=` AND a.loja=$${p.length}`}
     const r=await pool.query(`SELECT a.id,a.loja,a.auditor,a.responsavel,a.data_auditoria,a.nota_geral,a.criado_em,
       (SELECT COUNT(*)::int FROM auditorias_loja_os o WHERE o.auditoria_id=a.id AND o.status<>'Resolvido') os_abertas,
       (SELECT COUNT(*)::int FROM jsonb_array_elements(a.itens) x WHERE (x->>'nota')::int<=2) nao_conformidades
