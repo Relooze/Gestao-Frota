@@ -13,7 +13,7 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false
 });
 
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "15mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 
@@ -2727,7 +2727,7 @@ app.post("/api/usuarios",auth,somenteAdminSupervisor,async(req,res)=>{
     const {nome,email,perfil,veiculo_id}=req.body;
     const senha="1234";
     if(!nome||!email)return res.status(400).json({erro:"Nome e e-mail são obrigatórios."});
-    if(!["admin","supervisor","motorista"].includes(perfil))return res.status(400).json({erro:"Perfil inválido."});
+    if(!["admin","supervisor","motorista","loja"].includes(perfil))return res.status(400).json({erro:"Perfil inválido."});
     const hash=await bcrypt.hash(senha,12);
     const r=await pool.query(`INSERT INTO usuarios(nome,email,senha_hash,perfil,veiculo_id,primeiro_acesso)
       VALUES($1,$2,$3,$4,$5,TRUE) RETURNING id,nome,email,perfil,ativo,veiculo_id,primeiro_acesso`,
@@ -3526,6 +3526,97 @@ app.put('/api/abastecimentos/:id',auth,exigirSenhaAtualizada,somenteAdminSupervi
   }catch(e){console.error('editar abastecimento',e);res.status(500).json({erro:'Erro ao editar abastecimento.'});}
 });
 
+
+// ======================================================
+// V3.8.0 - AUDITORIA DE LOJAS COMJOL
+// ======================================================
+async function garantirAuditoriaLojasV380(){
+  await pool.query(`CREATE TABLE IF NOT EXISTS auditorias_loja (
+    id SERIAL PRIMARY KEY,
+    loja VARCHAR(30) NOT NULL,
+    usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    auditor VARCHAR(160),
+    responsavel VARCHAR(160),
+    data_auditoria DATE NOT NULL DEFAULT CURRENT_DATE,
+    itens JSONB NOT NULL DEFAULT '[]'::jsonb,
+    nota_geral NUMERIC(5,2),
+    criado_em TIMESTAMPTZ DEFAULT NOW()
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS auditorias_loja_os (
+    id SERIAL PRIMARY KEY,
+    auditoria_id INTEGER NOT NULL REFERENCES auditorias_loja(id) ON DELETE CASCADE,
+    loja VARCHAR(30) NOT NULL,
+    setor TEXT,
+    item_indice INTEGER,
+    item TEXT NOT NULL,
+    nota INTEGER,
+    observacao TEXT,
+    foto TEXT,
+    status VARCHAR(30) NOT NULL DEFAULT 'Pendente',
+    responsavel TEXT,
+    prazo DATE,
+    criado_em TIMESTAMPTZ DEFAULT NOW(),
+    atualizado_em TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(auditoria_id,item_indice)
+  )`);
+}
+const LOJAS_AUDITORIA=['COMJOL ZN','COMJOL PB','COMJOL PA','COMJOL RF','COMJOL PM','COMJOL BR','COMJOL AT'];
+function perfilAuditoria(req){return String(req.user?.perfil||'').trim().toLowerCase()}
+function podeAuditar(req){return ['loja','admin','administrador','supervisor'].includes(perfilAuditoria(req))}
+function podeGerirAuditoria(req){return ['admin','administrador','supervisor'].includes(perfilAuditoria(req))}
+
+app.get('/api/auditoria/lojas',auth,async(req,res)=>res.json(LOJAS_AUDITORIA));
+app.post('/api/auditoria/checklists',auth,async(req,res)=>{
+  try{
+    await garantirAuditoriaLojasV380();
+    if(!podeAuditar(req)) return res.status(403).json({erro:'Acesso não permitido.'});
+    const {loja,responsavel,itens}=req.body||{};
+    if(!LOJAS_AUDITORIA.includes(loja)) return res.status(400).json({erro:'Selecione uma loja válida.'});
+    if(!Array.isArray(itens)||!itens.length) return res.status(400).json({erro:'Checklist sem itens.'});
+    for(const x of itens){if(!Number.isInteger(Number(x.nota))||Number(x.nota)<1||Number(x.nota)>5)return res.status(400).json({erro:'Todos os itens precisam de nota de 1 a 5.'});if(!x.foto)return res.status(400).json({erro:'Anexe uma foto em cada item do checklist.'});}
+    const media=itens.reduce((s,x)=>s+Number(x.nota),0)/itens.length;
+    const r=await pool.query(`INSERT INTO auditorias_loja(loja,usuario_id,auditor,responsavel,data_auditoria,itens,nota_geral) VALUES($1,$2,$3,$4,CURRENT_DATE,$5::jsonb,$6) RETURNING *`,[loja,req.user.id,req.user.nome||'',responsavel||'',JSON.stringify(itens),media]);
+    res.json({sucesso:true,auditoria:r.rows[0]});
+  }catch(e){console.error('salvar auditoria loja',e);res.status(500).json({erro:'Erro ao salvar auditoria da loja.'})}
+});
+app.get('/api/auditoria/checklists',auth,async(req,res)=>{
+  try{
+    await garantirAuditoriaLojasV380();
+    if(!podeAuditar(req)) return res.status(403).json({erro:'Acesso não permitido.'});
+    const p=[];let w=' WHERE 1=1';
+    if(req.query.loja){p.push(req.query.loja);w+=` AND a.loja=$${p.length}`}
+    if(req.query.inicio){p.push(req.query.inicio);w+=` AND a.data_auditoria >= $${p.length}`}
+    if(req.query.fim){p.push(req.query.fim);w+=` AND a.data_auditoria <= $${p.length}`}
+    if(perfilAuditoria(req)==='loja'){p.push(req.user.id);w+=` AND a.usuario_id=$${p.length}`}
+    const r=await pool.query(`SELECT a.id,a.loja,a.auditor,a.responsavel,a.data_auditoria,a.nota_geral,a.criado_em,
+      (SELECT COUNT(*)::int FROM auditorias_loja_os o WHERE o.auditoria_id=a.id AND o.status<>'Resolvido') os_abertas,
+      (SELECT COUNT(*)::int FROM jsonb_array_elements(a.itens) x WHERE (x->>'nota')::int<=2) nao_conformidades
+      FROM auditorias_loja a ${w} ORDER BY a.data_auditoria DESC,a.id DESC`,p);
+    res.json({rows:r.rows,total:r.rowCount});
+  }catch(e){console.error('historico auditoria',e);res.status(500).json({erro:'Erro ao consultar auditorias.'})}
+});
+app.get('/api/auditoria/checklists/:id',auth,async(req,res)=>{
+  try{await garantirAuditoriaLojasV380();const r=await pool.query('SELECT * FROM auditorias_loja WHERE id=$1',[req.params.id]);if(!r.rowCount)return res.status(404).json({erro:'Auditoria não encontrada.'});res.json(r.rows[0]);}catch(e){res.status(500).json({erro:'Erro ao abrir auditoria.'})}
+});
+app.post('/api/auditoria/checklists/:id/gerar-os',auth,async(req,res)=>{
+  try{
+    await garantirAuditoriaLojasV380(); if(!podeGerirAuditoria(req))return res.status(403).json({erro:'Acesso restrito.'});
+    const r=await pool.query('SELECT * FROM auditorias_loja WHERE id=$1',[req.params.id]);if(!r.rowCount)return res.status(404).json({erro:'Auditoria não encontrada.'});
+    const a=r.rows[0], itens=Array.isArray(a.itens)?a.itens:JSON.parse(a.itens||'[]'); let n=0;
+    for(let i=0;i<itens.length;i++){const x=itens[i];if(Number(x.nota)<=2){const q=await pool.query(`INSERT INTO auditorias_loja_os(auditoria_id,loja,setor,item_indice,item,nota,observacao,foto,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'Pendente') ON CONFLICT(auditoria_id,item_indice) DO NOTHING RETURNING id`,[a.id,a.loja,x.setor||'',i,x.item||'',Number(x.nota),x.observacao||'',x.foto||null]);n+=q.rowCount}}
+    res.json({sucesso:true,criadas:n});
+  }catch(e){console.error('gerar os auditoria',e);res.status(500).json({erro:'Erro ao gerar O.S. de não conformidades.'})}
+});
+app.get('/api/auditoria/os',auth,async(req,res)=>{
+  try{await garantirAuditoriaLojasV380();if(!podeGerirAuditoria(req))return res.status(403).json({erro:'Acesso restrito.'});const p=[];let w=' WHERE 1=1';if(req.query.loja){p.push(req.query.loja);w+=` AND loja=$${p.length}`};if(req.query.status){p.push(req.query.status);w+=` AND status=$${p.length}`};const r=await pool.query(`SELECT * FROM auditorias_loja_os ${w} ORDER BY CASE status WHEN 'Pendente' THEN 0 WHEN 'Em andamento' THEN 1 ELSE 2 END,criado_em DESC`,p);res.json({rows:r.rows,total:r.rowCount})}catch(e){res.status(500).json({erro:'Erro ao consultar O.S. de auditoria.'})}
+});
+app.put('/api/auditoria/os/:id',auth,async(req,res)=>{
+  try{await garantirAuditoriaLojasV380();if(!podeGerirAuditoria(req))return res.status(403).json({erro:'Acesso restrito.'});const status=req.body.status;if(!['Pendente','Em andamento','Resolvido'].includes(status))return res.status(400).json({erro:'Status inválido.'});const r=await pool.query(`UPDATE auditorias_loja_os SET status=$1,responsavel=COALESCE($2,responsavel),prazo=COALESCE($3,prazo),atualizado_em=NOW() WHERE id=$4 RETURNING *`,[status,req.body.responsavel||null,req.body.prazo||null,req.params.id]);res.json({sucesso:true,os:r.rows[0]})}catch(e){res.status(500).json({erro:'Erro ao atualizar O.S.'})}
+});
+app.get('/api/auditoria/dashboard',auth,async(req,res)=>{
+  try{await garantirAuditoriaLojasV380();if(!podeGerirAuditoria(req))return res.status(403).json({erro:'Acesso restrito.'});const r=[];for(const loja of LOJAS_AUDITORIA){const q=await pool.query(`SELECT (SELECT COUNT(*)::int FROM auditorias_loja WHERE loja=$1 AND data_auditoria=CURRENT_DATE) feitos_hoje,(SELECT COUNT(*)::int FROM auditorias_loja_os WHERE loja=$1 AND status<>'Resolvido') os_abertas,(SELECT COUNT(*)::int FROM auditorias_loja_os WHERE loja=$1) os_total,(SELECT ROUND(AVG(nota_geral),2) FROM auditorias_loja WHERE loja=$1) media`,[loja]);r.push({loja,...q.rows[0]})}res.json({lojas:r,total_lojas:LOJAS_AUDITORIA.length,checklists_hoje:r.reduce((s,x)=>s+x.feitos_hoje,0),os_abertas:r.reduce((s,x)=>s+x.os_abertas,0)})}catch(e){res.status(500).json({erro:'Erro ao carregar dashboard das filiais.'})}
+});
+
 // V3.5.4 - IMPORTANTE: o fallback da SPA deve vir DEPOIS de todas as rotas /api.
 // Antes ele interceptava GET/POST de /api/solicitacoes-abastecimento e devolvia index.html,
 // impedindo motorista, supervisor e administrador de enxergarem a mesma solicitação persistida.
@@ -3540,5 +3631,6 @@ initDatabase()
   .then(importarHistoricoFrotaV3)
   .then(importarHistorico5041V241)
   .then(garantirControleConsumoV370)
+  .then(garantirAuditoriaLojasV380)
   .then(() => app.listen(PORT, "0.0.0.0", () => console.log(`Gestão-Frota online na porta ${PORT}`)))
   .catch(err => { console.error("Falha ao iniciar banco:", err); process.exit(1); });

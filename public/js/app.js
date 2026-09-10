@@ -27,6 +27,7 @@ async function boot(){
     if(String(user?.perfil||"").toLowerCase()==="motorista"){
       return abrirSelecaoVeiculoDia();
     }
+    if(String(user?.perfil||"").toLowerCase()==="loja") return selecionarLojaAuditoria();
     return loadDashboard();
   }
   const s=await api("/api/setup/status");
@@ -49,6 +50,7 @@ $("#loginForm").onsubmit=async e=>{
     if(String(user?.perfil||"").toLowerCase()==="motorista"){
       return abrirSelecaoVeiculoDia();
     }
+    if(String(user?.perfil||"").toLowerCase()==="loja") return selecionarLojaAuditoria();
     loadDashboard();
   }catch(x){$("#authMsg").textContent=x.message}
 };
@@ -74,6 +76,10 @@ $("#nav").onclick=e=>{
   else if(b.dataset.page==="abastecimentos") loadCombustivel();
   else if(b.dataset.page==="chamados-abertos") loadChamadosAbertos();
   else if(b.dataset.page==="perfil-motorista") loadPerfilMotorista();
+  else if(b.dataset.page==="auditoria-loja") loadAuditoriaLoja();
+  else if(b.dataset.page==="auditoria-historico") loadAuditoriaHistorico();
+  else if(b.dataset.page==="auditoria-os") loadAuditoriaOS();
+  else if(b.dataset.page==="auditoria-dashboard") loadAuditoriaDashboard();
   else loadList(b.dataset.page,b.textContent.trim());
 };
 
@@ -747,7 +753,7 @@ async function loadUsuarios(){
 function modalUsuario(vs){
  document.body.insertAdjacentHTML("beforeend",`<div class="modal-bg" id="modalUser"><form class="modal" id="formUser"><div class="tire-modal-head"><h2>👤 Novo usuário</h2><button type="button" class="secondary" id="xUser">✕</button></div>
  <div class="modal-grid"><label>Nome<input name="nome" required></label><label>E-mail<input name="email" type="email" required></label><div class="info-box"><b>Senha inicial:</b> 1234<br><small>O usuário será obrigado a criar uma nova senha no primeiro acesso.</small></div>
- <label>Perfil<select name="perfil" required><option value="motorista">Motorista</option><option value="supervisor">Supervisor</option><option value="admin">Administrador</option></select></label>
+ <label>Perfil<select name="perfil" required><option value="motorista">Motorista</option><option value="supervisor">Supervisor</option><option value="admin">Administrador</option><option value="loja">Loja / Auditor</option></select></label>
  <label>Veículo padrão<select name="veiculo_id"><option value="">Sem veículo fixo</option>${vs.map(v=>`<option value="${v.id}">${escapeHtml(v.prefixo)} • ${escapeHtml(v.placa||"-")}</option>`).join("")}</select></label></div>
  <div class="actions"><button type="button" class="secondary" id="cancelUser">Cancelar</button><button class="primary">Criar usuário</button></div></form></div>`);
  $("#xUser").onclick=$("#cancelUser").onclick=()=>$("#modalUser").remove();
@@ -931,11 +937,13 @@ async function aplicarMenuPorPerfil(){
     window.__sessao=s;
     user={...(user||{}),...s}; localStorage.setItem("user",JSON.stringify(user));
     const motorista=String(s.perfil||"").toLowerCase()==="motorista";
+    const loja=String(s.perfil||"").toLowerCase()==="loja";
     const permitidasMotorista=["dashboard","checklist-diario","checklists-realizados","abertura-chamado","minhas-os","solicitacao-abastecimento","perfil-motorista"];
+    const permitidasLoja=["auditoria-loja"];
     document.body.classList.toggle("perfil-motorista",motorista);
     document.querySelectorAll("#nav [data-page]").forEach(b=>{
-      b.hidden=motorista && !permitidasMotorista.includes(b.dataset.page);
-      b.style.display=(motorista && !permitidasMotorista.includes(b.dataset.page))?"none":"";
+      const ocultar=(motorista && !permitidasMotorista.includes(b.dataset.page)) || (loja && !permitidasLoja.includes(b.dataset.page));
+      b.hidden=ocultar; b.style.display=ocultar?"none":"";
     });
     if(motorista){
       window.__veiculoDia=null;
@@ -1143,3 +1151,51 @@ function addMenuChecklistsRealizados(){
 }
 document.addEventListener("click",e=>{const x=e.target.closest('[data-page="checklists-realizados"]');if(x){e.preventDefault();paginaChecklistsRealizados()}});
 document.addEventListener("DOMContentLoaded",()=>setTimeout(addMenuChecklistsRealizados,150));setTimeout(addMenuChecklistsRealizados,700);
+
+
+// ======================================================
+// V3.8.0 - AUDITORIA DE LOJAS
+// Checklist baseado no PDF Auditoria Operacional COMJOL.
+// ======================================================
+const AUDIT_LOJAS=['COMJOL ZN','COMJOL PB','COMJOL PA','COMJOL RF','COMJOL PM','COMJOL BR','COMJOL AT'];
+const AUDIT_SECOES=[
+['1. FRENTE DE LOJA E ESTACIONAMENTO',['Fachada e identificação visual estão limpas, conservadas e dentro do padrão da empresa?','Estacionamento está limpo, organizado, sinalizado e sem obstáculos?','Entrada da loja está limpa, organizada e com acesso seguro ao cliente?','Carrinhos e equipamentos de apoio ao cliente estão disponíveis e em boas condições?','Ofertas, campanhas e comunicação visual estão atualizadas e bem posicionadas?','Área de caixa/check-out está limpa, organizada e com fluxo adequado?']],
+['2. SALÃO DE VENDAS',['Corredores estão limpos, organizados, desobstruídos e seguros?','Gôndolas e prateleiras estão abastecidas e organizadas?','Produtos expostos possuem preço visível e identificação correta?','Produtos estão bem expostos, sem embalagens danificadas ou avarias aparentes?','Pontas de gôndola, ilhas e áreas promocionais estão organizadas e sinalizadas?','Produtos fora do lugar são recolocados corretamente e com agilidade?']],
+['3. TINTAS',['Setor está limpo, organizado, abastecido e com produtos corretamente precificados?','Máquina tintométrica e equipamentos do setor estão limpos e em condição de uso?','Tintas e complementos estão armazenados de forma segura, sem vazamentos ou embalagens danificadas?','Produtos promocionais e lançamentos estão destacados e sinalizados?','Estoque de apoio do setor está organizado e permite fácil localização dos produtos?']],
+['4. PISOS E REVESTIMENTOS',['Mostruários de pisos e revestimentos estão limpos, identificados e organizados?','Preços, códigos, medidas e informações dos produtos estão visíveis?','Peças quebradas, lascadas ou fora do padrão foram retiradas da exposição?','Corredores e áreas de exposição estão livres de riscos e obstáculos?','Materiais separados para clientes estão identificados e armazenados corretamente?']],
+['5. HIDRÁULICA, ELÉTRICA E FERRAGENS',['Produtos estão organizados por categoria e de fácil localização?','Prateleiras estão abastecidas, limpas e corretamente precificadas?','Peças pequenas e acessórios estão acondicionados sem mistura de códigos?','Há produtos danificados, abertos ou sem identificação na área de venda?','Exposição permite ao cliente comparar e identificar corretamente os produtos?']],
+['6. MATERIAIS PESADOS',['Cimento, argamassa, rejunte, blocos, telhas e demais materiais estão armazenados corretamente?','Pilhas e paletes estão estáveis, respeitando condições seguras de armazenamento?','Produtos estão protegidos contra umidade, chuva e avarias?','Materiais com embalagem rasgada ou danificada estão segregados e identificados?','Áreas de circulação e movimentação de carga estão livres e sinalizadas?']],
+['7. ESTOQUE E ARMAZENAMENTO',['Endereçamento do estoque está identificado e facilita a localização dos materiais?','Paletes e materiais estão armazenados de forma organizada e segura?','Não há materiais obstruindo corredores, equipamentos de segurança ou rotas de fuga?','Produtos avariados, devolvidos ou pendentes estão segregados e identificados?','Há controle visual e organização adequada das áreas de recebimento e armazenagem?','Empilhamento respeita limites e condições seguras para o tipo de produto?']],
+['8. EXPEDIÇÃO E RETIRADA DE MERCADORIAS',['Pedidos separados estão identificados com cliente/pedido e organizados por status?','Área de retirada está organizada e permite atendimento seguro e ágil?','Mercadorias são conferidas antes da liberação ao cliente ou carregamento?','Retiradas parciais são registradas e formalizadas quando necessárias?','Materiais aguardando carregamento estão protegidos contra avarias e intempéries?','Fluxo de veículos, clientes e equipamentos na expedição está organizado?']],
+['9. SEGURANÇA OPERACIONAL',['Extintores e equipamentos de combate a incêndio estão acessíveis e dentro da validade?','Rotas de fuga e saídas de emergência estão sinalizadas e desobstruídas?','Colaboradores utilizam os EPIs exigidos para suas atividades?','Empilhadeiras e equipamentos de movimentação apresentam condições seguras de operação?','Áreas de risco estão sinalizadas e isoladas quando necessário?','Não existem materiais ou estruturas com risco imediato de queda, acidente ou colisão?']],
+['10. EQUIPE E PADRÃO DE ATENDIMENTO',['Colaboradores estão uniformizados e identificados conforme padrão?','Equipe demonstra postura adequada e disponibilidade para atendimento?','Setores possuem responsáveis e rotina de organização definida?','Pendências identificadas anteriormente foram tratadas ou possuem plano de ação?']]
+];
+function auditClass(n){return n>=5?'Excelente':n===4?'Bom':n===3?'Atenção':n===2?'Não conforme':'Crítico'}
+async function selecionarLojaAuditoria(){
+  $('#pageTitle').textContent='Selecionar Loja para Auditoria';
+  $('#content').innerHTML=`<section class="panel"><h2>🏪 Qual loja será auditada?</h2><p>Selecione a unidade antes de iniciar o checklist.</p><div class="audit-store-grid">${AUDIT_LOJAS.map(l=>`<button class="audit-store" data-loja="${l}">${l}</button>`).join('')}</div></section>`;
+  document.querySelectorAll('[data-loja]').forEach(b=>b.onclick=()=>{localStorage.setItem('auditoria_loja',b.dataset.loja);loadAuditoriaLoja()});
+}
+async function reduzirFoto(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const max=700,sc=Math.min(1,max/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*sc);c.height=Math.round(im.height*sc);c.getContext('2d').drawImage(im,0,0,c.width,c.height);resolve(c.toDataURL('image/jpeg',.58))};im.onerror=reject;im.src=r.result};r.onerror=reject;r.readAsDataURL(file)})}
+async function loadAuditoriaLoja(){
+ const loja=localStorage.getItem('auditoria_loja'); if(!loja)return selecionarLojaAuditoria();
+ $('#pageTitle').textContent='Auditoria de Loja'; let idx=0;
+ const secoes=AUDIT_SECOES.map(([s,itens])=>`<section class="panel audit-section"><h3>${s}</h3>${itens.map(item=>{const i=idx++;return `<div class="audit-item" data-ai="${i}" data-setor="${escapeHtml(s)}" data-item="${escapeHtml(item)}"><div class="audit-question"><b>${escapeHtml(item)}</b><div class="audit-score">${[1,2,3,4,5].map(n=>`<label><input type="radio" name="nota_${i}" value="${n}"><span>${n}</span></label>`).join('')}</div><small class="audit-rating">Selecione a nota</small></div><label>Observação / ação corretiva<textarea class="audit-obs" placeholder="Descreva a situação observada e a ação necessária, se houver."></textarea></label><label class="audit-photo">📷 Foto obrigatória<input type="file" accept="image/*" capture="environment" class="audit-file"><span class="audit-photo-status">Nenhuma foto anexada</span></label></div>`}).join('')}</section>`).join('');
+ $('#content').innerHTML=`<section class="panel"><div class="os-head"><div><h2>🏪 ${loja}</h2><p>Auditor: <b>${escapeHtml(user?.nome||'')}</b> • Data: ${new Date().toLocaleDateString('pt-BR')}</p></div><button class="secondary" id="trocarLojaAudit">Trocar loja</button></div><div class="audit-legend">5 Excelente • 4 Bom • 3 Atenção • 2 Não conforme • 1 Crítico</div><label>Responsável da loja<input id="auditResponsavel" placeholder="Nome do responsável que acompanhou a auditoria"></label></section>${secoes}<section class="panel"><button class="primary" id="finalizarAudit">✅ Finalizar e enviar auditoria</button></section>`;
+ $('#trocarLojaAudit').onclick=()=>{localStorage.removeItem('auditoria_loja');selecionarLojaAuditoria()};
+ document.querySelectorAll('.audit-item').forEach(el=>{el.querySelectorAll('input[type=radio]').forEach(r=>r.onchange=()=>{el.querySelector('.audit-rating').textContent=auditClass(Number(r.value))});el.querySelector('.audit-file').onchange=async e=>{const f=e.target.files[0];if(!f)return;el.dataset.foto=await reduzirFoto(f);el.querySelector('.audit-photo-status').textContent='✅ Foto anexada'}});
+ $('#finalizarAudit').onclick=async()=>{const els=[...document.querySelectorAll('.audit-item')],itens=[];for(const el of els){const n=el.querySelector('input[type=radio]:checked');if(!n){alert('Preencha a nota de todos os itens.');el.scrollIntoView({behavior:'smooth'});return}if(!el.dataset.foto){alert('Anexe uma foto em todos os itens.');el.scrollIntoView({behavior:'smooth'});return}itens.push({setor:el.dataset.setor,item:el.dataset.item,nota:Number(n.value),classificacao:auditClass(Number(n.value)),observacao:el.querySelector('.audit-obs').value.trim(),foto:el.dataset.foto})}if(!confirm(`Finalizar auditoria da ${loja}?`))return;try{const r=await api('/api/auditoria/checklists',{method:'POST',body:JSON.stringify({loja,responsavel:$('#auditResponsavel').value.trim(),itens})});alert(`Auditoria salva. Nota geral: ${Number(r.auditoria.nota_geral).toFixed(2)}`);loadAuditoriaLoja()}catch(e){alert(e.message)}};
+}
+async function loadAuditoriaHistorico(){
+ $('#pageTitle').textContent='Histórico de Auditorias'; const lojaOpts=AUDIT_LOJAS.map(l=>`<option>${l}</option>`).join('');
+ $('#content').innerHTML=`<section class="panel"><h2>📚 Acompanhamento das Auditorias</h2><div class="audit-filters"><label>Loja<select id="ahLoja"><option value="">Todas</option>${lojaOpts}</select></label><label>Data inicial<input type="date" id="ahIni"></label><label>Data final<input type="date" id="ahFim"></label><button class="primary" id="ahPesquisar">Pesquisar</button></div></section><div id="ahResult"></div>`;
+ const buscar=async()=>{const q=new URLSearchParams();if($('#ahLoja').value)q.set('loja',$('#ahLoja').value);if($('#ahIni').value)q.set('inicio',$('#ahIni').value);if($('#ahFim').value)q.set('fim',$('#ahFim').value);try{const d=await api('/api/auditoria/checklists?'+q),rows=asRows(d);$('#ahResult').innerHTML=`<section class="panel"><div class="cards"><div><small>Auditorias</small><h2>${rows.length}</h2></div><div><small>Não conformidades</small><h2>${rows.reduce((s,x)=>s+Number(x.nao_conformidades||0),0)}</h2></div><div><small>O.S. abertas</small><h2>${rows.reduce((s,x)=>s+Number(x.os_abertas||0),0)}</h2></div></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Loja</th><th>Auditor</th><th>Nota</th><th>Não conformidades</th><th>O.S. abertas</th><th>Ações</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${formatarDataBR(x.data_auditoria)}</td><td><b>${x.loja}</b></td><td>${escapeHtml(x.auditor||'-')}</td><td><b>${Number(x.nota_geral||0).toFixed(2)}</b></td><td>${x.nao_conformidades}</td><td>${x.os_abertas}</td><td><button class="secondary" data-audit-open="${x.id}">Ver</button> <button class="primary" data-audit-os="${x.id}">Gerar O.S.</button></td></tr>`).join('')||'<tr><td colspan="7">Nenhuma auditoria encontrada.</td></tr>'}</tbody></table></div></section>`;document.querySelectorAll('[data-audit-open]').forEach(b=>b.onclick=()=>abrirAuditoria(b.dataset.auditOpen));document.querySelectorAll('[data-audit-os]').forEach(b=>b.onclick=async()=>{try{const r=await api(`/api/auditoria/checklists/${b.dataset.auditOs}/gerar-os`,{method:'POST',body:'{}'});alert(`${r.criadas} O.S. de não conformidade criada(s).`);buscar()}catch(e){alert(e.message)}})}catch(e){$('#ahResult').innerHTML=`<section class="panel">${escapeHtml(e.message)}</section>`}};$('#ahPesquisar').onclick=buscar;buscar();
+}
+async function abrirAuditoria(id){const a=await api(`/api/auditoria/checklists/${id}`),it=Array.isArray(a.itens)?a.itens:[];const w=window.open('','_blank');w.document.write(`<html><head><title>Auditoria ${a.loja}</title><style>body{font-family:Arial;padding:25px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #bbb;padding:7px;text-align:left}img{width:110px;height:80px;object-fit:cover}.bad{background:#fee}</style></head><body><h1>Auditoria Operacional - COMJOL</h1><p><b>Loja:</b> ${a.loja} &nbsp; <b>Data:</b> ${formatarDataBR(a.data_auditoria)} &nbsp; <b>Auditor:</b> ${escapeHtml(a.auditor||'-')}</p><p><b>Nota geral:</b> ${Number(a.nota_geral||0).toFixed(2)} / 5,0</p><table><tr><th>Setor</th><th>Item</th><th>Nota</th><th>Observação</th><th>Foto</th></tr>${it.map(x=>`<tr class="${Number(x.nota)<=2?'bad':''}"><td>${escapeHtml(x.setor)}</td><td>${escapeHtml(x.item)}</td><td>${x.nota} - ${escapeHtml(x.classificacao||'')}</td><td>${escapeHtml(x.observacao||'-')}</td><td><img src="${x.foto}"></td></tr>`).join('')}</table><script>setTimeout(()=>window.print(),500)<\/script></body></html>`);w.document.close()}
+async function loadAuditoriaOS(){
+ $('#pageTitle').textContent='O.S. de Não Conformidades';const lojaOpts=AUDIT_LOJAS.map(l=>`<option>${l}</option>`).join('');$('#content').innerHTML=`<section class="panel"><h2>🛠 Tratamento de Não Conformidades</h2><div class="audit-filters"><label>Loja<select id="aosLoja"><option value="">Todas</option>${lojaOpts}</select></label><label>Status<select id="aosStatus"><option value="">Todos</option><option>Pendente</option><option>Em andamento</option><option>Resolvido</option></select></label><button class="primary" id="aosBusca">Pesquisar</button><button class="secondary" id="aosPrint">🖨 Relatório</button></div></section><div id="aosResult"></div>`;
+ const busca=async()=>{const q=new URLSearchParams();if($('#aosLoja').value)q.set('loja',$('#aosLoja').value);if($('#aosStatus').value)q.set('status',$('#aosStatus').value);const d=await api('/api/auditoria/os?'+q),rows=asRows(d);$('#aosResult').innerHTML=`<section class="panel"><div class="table-wrap"><table><thead><tr><th>Loja</th><th>Setor / item</th><th>Nota</th><th>Não conformidade</th><th>Evidência</th><th>Status</th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${x.loja}</b></td><td>${escapeHtml(x.setor)}<br>${escapeHtml(x.item)}</td><td>${x.nota}</td><td>${escapeHtml(x.observacao||'-')}</td><td>${x.foto?`<img class="audit-thumb" src="${x.foto}">`:'-'}</td><td><select data-aos-status="${x.id}"><option ${x.status==='Pendente'?'selected':''}>Pendente</option><option ${x.status==='Em andamento'?'selected':''}>Em andamento</option><option ${x.status==='Resolvido'?'selected':''}>Resolvido</option></select></td></tr>`).join('')||'<tr><td colspan="6">Nenhuma O.S. encontrada.</td></tr>'}</tbody></table></div></section>`;document.querySelectorAll('[data-aos-status]').forEach(s=>s.onchange=async()=>{try{await api(`/api/auditoria/os/${s.dataset.aosStatus}`,{method:'PUT',body:JSON.stringify({status:s.value})})}catch(e){alert(e.message)}});window.__auditOsRows=rows};$('#aosBusca').onclick=busca;$('#aosPrint').onclick=()=>{const rows=window.__auditOsRows||[],w=window.open('','_blank');w.document.write(`<html><head><title>Relatório de Não Conformidades</title><style>body{font-family:Arial;padding:24px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #aaa;padding:6px}img{width:100px}</style></head><body><h1>Relatório de Não Conformidades - COMJOL</h1><p>Loja: ${$('#aosLoja').value||'Todas'} | Status: ${$('#aosStatus').value||'Todos'} | Emitido em ${new Date().toLocaleString('pt-BR')}</p><table><tr><th>Loja</th><th>Setor</th><th>Item</th><th>Nota</th><th>Observação</th><th>Status</th><th>Foto</th></tr>${rows.map(x=>`<tr><td>${x.loja}</td><td>${escapeHtml(x.setor)}</td><td>${escapeHtml(x.item)}</td><td>${x.nota}</td><td>${escapeHtml(x.observacao||'-')}</td><td>${x.status}</td><td>${x.foto?`<img src="${x.foto}">`:'-'}</td></tr>`).join('')}</table><script>setTimeout(()=>window.print(),500)<\/script></body></html>`);w.document.close()};busca();
+}
+async function loadAuditoriaDashboard(){
+ $('#pageTitle').textContent='Dashboard das Filiais';try{const d=await api('/api/auditoria/dashboard');$('#content').innerHTML=`<div class="cards">${card('Filiais',d.total_lojas,'🏪')}${card('Checklists hoje',d.checklists_hoje,'✅')}${card('O.S. abertas',d.os_abertas,'🛠')}</div><section class="panel" style="margin-top:16px"><h2>📊 Situação das filiais</h2><div class="table-wrap"><table><thead><tr><th>Loja</th><th>Checklist hoje</th><th>Média histórica</th><th>O.S. abertas</th><th>Total O.S.</th></tr></thead><tbody>${d.lojas.map(x=>`<tr><td><b>${x.loja}</b></td><td>${Number(x.feitos_hoje)>0?'✅ Feito':'⚠️ Pendente'}</td><td>${x.media==null?'-':Number(x.media).toFixed(2)}</td><td><b>${x.os_abertas}</b></td><td>${x.os_total}</td></tr>`).join('')}</tbody></table></div></section>`}catch(e){$('#content').innerHTML=`<section class="panel">${escapeHtml(e.message)}</section>`}
+}
