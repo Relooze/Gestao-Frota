@@ -2738,15 +2738,19 @@ app.post("/api/usuarios",auth,somenteAdminSupervisor,async(req,res)=>{
   }catch(e){res.status(400).json({erro:e.code==="23505"?"E-mail já cadastrado.":e.message})}
 });
 
-app.put("/api/usuarios/:id",auth,somenteAdminSupervisor,async(req,res)=>{
+app.put("/api/usuarios/:id",auth,somenteAdmin,async(req,res)=>{
   const {nome,email,perfil,ativo,veiculo_id,senha,loja_vinculada}=req.body;
+  if(!nome||!email)return res.status(400).json({erro:"Nome e e-mail são obrigatórios."});
+  if(!["admin","supervisor","motorista","loja"].includes(perfil))return res.status(400).json({erro:"Perfil inválido."});
+  if(perfil==="loja" && !LOJAS_AUDITORIA.includes(loja_vinculada))return res.status(400).json({erro:"Selecione a loja vinculada ao usuário."});
   if(senha){
+    if(String(senha).length<6)return res.status(400).json({erro:"A nova senha deve ter no mínimo 6 caracteres."});
     const hash=await bcrypt.hash(senha,12);
-    await pool.query(`UPDATE usuarios SET nome=$1,email=$2,perfil=$3,ativo=$4,veiculo_id=$5,loja_vinculada=$6,senha_hash=$7 WHERE id=$8`,
-      [nome,email,perfil,ativo!==false,veiculo_id||null,perfil==='loja'?loja_vinculada:null,hash,req.params.id]);
+    await pool.query(`UPDATE usuarios SET nome=$1,email=$2,perfil=$3,ativo=$4,veiculo_id=$5,loja_vinculada=$6,senha_hash=$7,primeiro_acesso=TRUE WHERE id=$8`,
+      [nome.trim(),email.trim().toLowerCase(),perfil,ativo!==false,veiculo_id||null,perfil==='loja'?loja_vinculada:null,hash,req.params.id]);
   }else{
     await pool.query(`UPDATE usuarios SET nome=$1,email=$2,perfil=$3,ativo=$4,veiculo_id=$5,loja_vinculada=$6 WHERE id=$7`,
-      [nome,email,perfil,ativo!==false,veiculo_id||null,perfil==='loja'?loja_vinculada:null,req.params.id]);
+      [nome.trim(),email.trim().toLowerCase(),perfil,ativo!==false,veiculo_id||null,perfil==='loja'?loja_vinculada:null,req.params.id]);
   }
   res.json({sucesso:true});
 });
@@ -2777,6 +2781,10 @@ app.post("/api/checklist-diario",auth,async(req,res)=>{
     for(let i=0;i<CHECKLIST_DIARIO_ITENS.length;i++){
       if(itens[i].item!==CHECKLIST_DIARIO_ITENS[i]||!["EXCELENTE","BOM","REGULAR","RUIM","CRITICO","NA"].includes(itens[i].status))
         return res.status(400).json({erro:`Preencha corretamente o item ${i+1}.`});
+    }
+    for(let i=0;i<itens.length;i++){
+      if(["RUIM","CRITICO"].includes(itens[i].status) && !itens[i].foto)
+        return res.status(400).json({erro:`Anexe uma foto no item ${i+1} (${itens[i].status}).`});
     }
     const ja=await pool.query(`SELECT id FROM checklists WHERE usuario_id=$1 AND veiculo_id=$2 AND data_checklist=CURRENT_DATE`,[req.user.id,veiculo_id]);
     if(ja.rowCount)return res.status(400).json({erro:"Checklist deste veículo já enviado hoje por este motorista."});

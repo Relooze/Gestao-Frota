@@ -674,7 +674,7 @@ async function loadChecklistDiario(){
     $("#sendDailyCheck").disabled=n!==CHECK_ITENS.length;
   }
   function abrirItem(i){
-    const old=itensSalvos[i]||{status:"",observacao:""};
+    const old=itensSalvos[i]||{status:"",observacao:"",foto:null};
     document.body.insertAdjacentHTML("beforeend",`<div class="modal-bg check-modal-bg" id="checkItemModal">
       <div class="modal check-item-modal">
         <div class="tire-modal-head"><div><small>ITEM ${i+1} DE ${CHECK_ITENS.length}</small><h2>${escapeHtml(CHECK_ITENS[i])}</h2></div><button type="button" class="secondary" id="closeCheckItem">✕</button></div>
@@ -683,18 +683,22 @@ async function loadChecklistDiario(){
           ${[["EXCELENTE","🟢","Excelente"],["BOM","🟢","Bom"],["REGULAR","🟡","Regular"],["RUIM","🟠","Ruim"],["CRITICO","🔴","Crítico"],["NA","⚪","Não se aplica"]].map(x=>`<button type="button" class="status-option ${old.status===x[0]?"selected":""}" data-status="${x[0]}"><span>${x[1]}</span><b>${x[2]}</b></button>`).join("")}
         </div>
         <label>Observação<textarea id="checkItemObs" rows="4" placeholder="Descreva qualquer anormalidade ou detalhe...">${escapeHtml(old.observacao||"")}</textarea></label>
+        <label id="checkPhotoWrap" style="display:${["RUIM","CRITICO"].includes(old.status)?"block":"none"}">📷 Foto da não conformidade <b style="color:#b91c1c">(obrigatória para Ruim ou Crítico)</b><input id="checkItemFoto" type="file" accept="image/*" capture="environment"><small id="checkPhotoStatus">${old.foto?"✅ Foto anexada":"Nenhuma foto anexada"}</small></label>
         <button type="button" class="primary save-check-item" id="saveCheckItem" ${old.status?"":"disabled"}>✓ Salvar item</button>
       </div></div>`);
-    let escolhido=old.status;
+    let escolhido=old.status, fotoItem=old.foto||null;
+    const syncFoto=()=>{const obrig=["RUIM","CRITICO"].includes(escolhido);$("#checkPhotoWrap").style.display=obrig?"block":"none"};
     document.querySelectorAll(".status-option").forEach(b=>b.onclick=()=>{
       escolhido=b.dataset.status;
       document.querySelectorAll(".status-option").forEach(x=>x.classList.toggle("selected",x===b));
-      $("#saveCheckItem").disabled=false;
+      syncFoto();$("#saveCheckItem").disabled=false;
     });
+    $("#checkItemFoto").onchange=async e=>{const f=e.target.files[0];if(!f)return;try{fotoItem=await reduzirFoto(f);$("#checkPhotoStatus").textContent="✅ Foto anexada"}catch(x){alert("Não foi possível processar a foto.")}};
     $("#closeCheckItem").onclick=()=>$("#checkItemModal").remove();
     $("#saveCheckItem").onclick=()=>{
       if(!escolhido)return;
-      itensSalvos[i]={item:CHECK_ITENS[i],status:escolhido,observacao:$("#checkItemObs").value.trim()};
+      if(["RUIM","CRITICO"].includes(escolhido)&&!fotoItem)return alert("Foto obrigatória para item Ruim ou Crítico.");
+      itensSalvos[i]={item:CHECK_ITENS[i],status:escolhido,observacao:$("#checkItemObs").value.trim(),foto:fotoItem};
       const card=document.querySelector(`[data-check-item="${i}"]`);
       const result=$("#ckResult"+i);
       const map={EXCELENTE:"🟢 Excelente",BOM:"🟢 Bom",REGULAR:"🟡 Regular",RUIM:"🟠 Ruim",CRITICO:"🔴 Crítico",NA:"⚪ N/A"};
@@ -730,7 +734,7 @@ async function loadTratamentoChecklist(){
       <div class="table-wrap"><table><thead><tr><th>Data</th><th>Veículo</th><th>Motorista</th><th>Alertas</th><th>Situação</th><th>O.S.</th><th>Ação</th></tr></thead>
       <tbody>${rows.map(x=>{const probs=(x.itens||[]).filter(i=>["RUIM","CRITICO"].includes(i.status));return `<tr class="${probs.length?"check-problem":""}">
         <td>${formatarDataBR(x.data_checklist)}</td><td><b>${escapeHtml(x.prefixo)}</b><br>${escapeHtml(x.placa||"")}</td><td>${escapeHtml(x.motorista||"-")}</td>
-        <td>${probs.length?`<b>🚨 ${probs.length}</b><br>${probs.map(p=>`${escapeHtml(p.item)} (${p.status})`).join("<br>")}`:"✅ Sem pendência"}</td>
+        <td>${probs.length?`<b>🚨 ${probs.length}</b><br>${probs.map(p=>`${escapeHtml(p.item)} (${p.status})${p.foto?`<br><a href="${p.foto}" target="_blank">📷 Ver foto</a>`:""}`).join("<br>")}`:"✅ Sem pendência"}</td>
         <td><select data-ckstatus="${x.id}">${["Pendente","Em análise","Sem pendência","Tratado","O.S. gerada"].map(st=>`<option ${x.status_tratamento===st?"selected":""} ${st==="O.S. gerada"?"disabled":""}>${st}</option>`).join("")}</select></td>
         <td>${x.ordem_servico_id?`<button class="secondary" data-open-os="${x.ordem_servico_id}">Abrir O.S.</button>`:"-"}</td>
         <td>${probs.length&&!x.ordem_servico_id?`<button class="primary" data-genck="${x.id}">📋 Gerar O.S.</button>`:""}</td></tr>`}).join("")}</tbody></table></div></section>`;
@@ -744,9 +748,11 @@ async function loadUsuarios(){
   $("#pageTitle").textContent="Usuários";
   try{
     const [rows,vs]=await Promise.all([api("/api/usuarios"),api("/api/veiculos")]);
-    $("#content").innerHTML=`<section class="panel"><div class="os-head"><div><h3>👤 Usuários e perfis de acesso</h3><p>Motorista: checklist diário. Supervisor: tratamento e O.S. Admin: acesso completo.</p></div><button class="primary" id="novoUser">+ Novo usuário</button></div>
-    <div class="table-wrap"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Loja vinculada</th><th>Veículo padrão</th><th>Status</th>${isAdmin()?"<th>Ação</th>":""}</tr></thead><tbody>${rows.map(u=>`<tr><td><b>${escapeHtml(u.nome)}</b></td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.perfil)}</td><td>${escapeHtml(u.loja_vinculada||"-")}</td><td>${escapeHtml(u.veiculo_prefixo||"-")}</td><td>${u.ativo?"Ativo":"Inativo"}</td>${isAdmin()?`<td><button class="secondary" data-del-user="${u.id}" data-user-name="${escapeHtml(u.nome)}">🗑 Excluir</button></td>`:""}</tr>`).join("")}</tbody></table></div></section>`;
+    window.__usuariosCache=rows; window.__veiculosUsuarios=vs;
+    $("#content").innerHTML=`<section class="panel"><div class="os-head"><div><h3>👤 Usuários e perfis de acesso</h3><p>Administrador pode editar nome, e-mail, perfil, loja, veículo e redefinir senha.</p></div><button class="primary" id="novoUser">+ Novo usuário</button></div>
+    <div class="table-wrap"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Loja vinculada</th><th>Veículo padrão</th><th>Status</th>${isAdmin()?"<th>Ações</th>":""}</tr></thead><tbody>${rows.map(u=>`<tr><td><b>${escapeHtml(u.nome)}</b></td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.perfil)}</td><td>${escapeHtml(u.loja_vinculada||"-")}</td><td>${escapeHtml(u.veiculo_prefixo||"-")}</td><td>${u.ativo?"Ativo":"Inativo"}</td>${isAdmin()?`<td><button class="secondary" data-edit-user="${u.id}">✏️ Editar</button> <button class="secondary" data-del-user="${u.id}" data-user-name="${escapeHtml(u.nome)}">🗑 Excluir</button></td>`:""}</tr>`).join("")}</tbody></table></div></section>`;
     $("#novoUser").onclick=()=>modalUsuario(vs);
+    document.querySelectorAll("[data-edit-user]").forEach(b=>b.onclick=()=>{const u=rows.find(x=>String(x.id)===String(b.dataset.editUser));modalEditarUsuario(u,vs)});
     document.querySelectorAll("[data-del-user]").forEach(b=>b.onclick=async()=>{if(!confirm(`Excluir definitivamente o usuário ${b.dataset.userName}?`))return;try{await api(`/api/usuarios/${b.dataset.delUser}`,{method:"DELETE"});loadUsuarios()}catch(e){alert(e.message)}});
   }catch(e){$("#content").innerHTML=`<section class="panel"><h3>Acesso restrito</h3><p>${escapeHtml(e.message)}</p></section>`}
 }
@@ -759,9 +765,21 @@ function modalUsuario(vs){
  <div class="actions"><button type="button" class="secondary" id="cancelUser">Cancelar</button><button class="primary">Criar usuário</button></div></form></div>`);
  $("#xUser").onclick=$("#cancelUser").onclick=()=>$("#modalUser").remove();
  const perfilSel=$("#perfilUser"),lojaWrap=$("#lojaUserWrap"),lojaSel=$("#lojaUser");
- const syncLoja=()=>{const ehLoja=perfilSel.value==="loja";lojaWrap.style.display=ehLoja?"block":"none";lojaSel.required=ehLoja;if(!ehLoja)lojaSel.value=""};
- perfilSel.onchange=syncLoja;syncLoja();
+ const syncLoja=()=>{const ehLoja=perfilSel.value==="loja";lojaWrap.style.display=ehLoja?"block":"none";lojaSel.required=ehLoja;if(!ehLoja)lojaSel.value=""};perfilSel.onchange=syncLoja;syncLoja();
  $("#formUser").onsubmit=async e=>{e.preventDefault();const o=Object.fromEntries(new FormData(e.target));if(!o.veiculo_id)o.veiculo_id=null;try{await api("/api/usuarios",{method:"POST",body:JSON.stringify(o)});$("#modalUser").remove();loadUsuarios()}catch(x){alert(x.message)}};
+}
+function modalEditarUsuario(u,vs){
+ document.body.insertAdjacentHTML("beforeend",`<div class="modal-bg" id="modalEditUser"><form class="modal" id="formEditUser"><div class="tire-modal-head"><h2>✏️ Editar usuário</h2><button type="button" class="secondary" id="xEditUser">✕</button></div>
+ <div class="modal-grid"><label>Nome<input name="nome" value="${escapeHtml(u.nome||"")}" required></label><label>E-mail<input name="email" type="email" value="${escapeHtml(u.email||"")}" required></label>
+ <label>Perfil<select name="perfil" id="editPerfilUser">${[["motorista","Motorista"],["supervisor","Supervisor"],["admin","Administrador"],["loja","Loja / Auditor"]].map(([v,t])=>`<option value="${v}" ${u.perfil===v?"selected":""}>${t}</option>`).join("")}</select></label>
+ <label id="editLojaWrap">Loja vinculada<select name="loja_vinculada" id="editLojaUser"><option value="">Sem loja</option>${AUDIT_LOJAS.map(l=>`<option value="${l}" ${u.loja_vinculada===l?"selected":""}>${l}</option>`).join("")}</select></label>
+ <label>Veículo padrão<select name="veiculo_id"><option value="">Sem veículo fixo</option>${vs.map(v=>`<option value="${v.id}" ${String(u.veiculo_id)===String(v.id)?"selected":""}>${escapeHtml(v.prefixo)} • ${escapeHtml(v.placa||"-")}</option>`).join("")}</select></label>
+ <label>Status<select name="ativo"><option value="true" ${u.ativo?"selected":""}>Ativo</option><option value="false" ${!u.ativo?"selected":""}>Inativo</option></select></label>
+ <label style="grid-column:1/-1">Redefinir senha <input name="senha" type="password" minlength="6" placeholder="Deixe vazio para manter a senha atual"><small>Se informar uma nova senha, o usuário deverá alterá-la no próximo acesso.</small></label></div>
+ <div class="actions"><button type="button" class="secondary" id="cancelEditUser">Cancelar</button><button class="primary">💾 Salvar alterações</button></div></form></div>`);
+ const fechar=()=>$("#modalEditUser").remove();$("#xEditUser").onclick=$("#cancelEditUser").onclick=fechar;
+ const ps=$("#editPerfilUser"),lw=$("#editLojaWrap"),ls=$("#editLojaUser");const sync=()=>{const x=ps.value==="loja";lw.style.display=x?"block":"none";ls.required=x;if(!x)ls.value=""};ps.onchange=sync;sync();
+ $("#formEditUser").onsubmit=async e=>{e.preventDefault();const o=Object.fromEntries(new FormData(e.target));o.ativo=o.ativo==="true";o.veiculo_id=o.veiculo_id?Number(o.veiculo_id):null;if(!o.senha)delete o.senha;try{await api(`/api/usuarios/${u.id}`,{method:"PUT",body:JSON.stringify(o)});fechar();alert("Usuário atualizado com sucesso.");loadUsuarios()}catch(x){alert(x.message)}};
 }
 
 
