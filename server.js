@@ -46,6 +46,8 @@ async function initDatabase() {
       km_atual NUMERIC(12,1) DEFAULT 0,
       status VARCHAR(30) NOT NULL DEFAULT 'Disponível',
       observacao TEXT,
+      foto TEXT,
+      status_origem VARCHAR(20),
       criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
@@ -154,6 +156,9 @@ async function initDatabase() {
       observacao TEXT,
       criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    ALTER TABLE ordem_servico_itens ADD COLUMN IF NOT EXISTS foto TEXT;
+    ALTER TABLE ordem_servico_itens ADD COLUMN IF NOT EXISTS status_origem VARCHAR(20);
 
     CREATE TABLE IF NOT EXISTS sistema_config (
       chave VARCHAR(80) PRIMARY KEY,
@@ -2566,6 +2571,18 @@ app.get("/api/ordens-servico/:id", auth, async (req,res) => {
     }
     if(!os.rowCount)return res.status(404).json({erro:"O.S. não encontrada."});
     const itens=await pool.query("SELECT * FROM ordem_servico_itens WHERE ordem_id=$1 ORDER BY id",[req.params.id]);
+    // Compatibilidade com O.S. de checklist criadas antes da coluna foto existir:
+    // recupera foto/status diretamente do JSON do checklist de origem.
+    for (const item of itens.rows) {
+      if (String(item.origem||"").toLowerCase()==="checklist" && item.origem_id && !item.foto) {
+        const ck=await pool.query("SELECT itens FROM checklists WHERE id=$1",[item.origem_id]);
+        if (ck.rowCount) {
+          const lista=Array.isArray(ck.rows[0].itens)?ck.rows[0].itens:[];
+          const achado=lista.find(x=>String(item.descricao||"").startsWith(String(x.item||"")));
+          if (achado) { item.foto=achado.foto||null; item.status_origem=achado.status||item.status_origem||null; item.observacao_origem=achado.observacao||null; }
+        }
+      }
+    }
     res.json({ordem:os.rows[0],itens:itens.rows});
   }catch(e){res.status(500).json({erro:"Erro ao abrir ordem de serviço."});}
 });
@@ -2818,9 +2835,9 @@ app.post("/api/checklist-tratamento/:id/gerar-os",auth,somenteAdminSupervisor,as
     const oid=os.rows[0].id, numero=`OS-${String(oid).padStart(6,"0")}`;
     await c.query("UPDATE ordens_servico SET numero=$1 WHERE id=$2",[numero,oid]);
     for(const p of problemas){
-      await c.query(`INSERT INTO ordem_servico_itens(ordem_id,origem,origem_id,descricao,prioridade)
-        VALUES($1,'Checklist',$2,$3,$4)`,
-        [oid,Number(req.params.id),`${p.item}${p.observacao?` • ${p.observacao}`:""}`,p.status==="CRITICO"?"Crítica":"Alta"]);
+      await c.query(`INSERT INTO ordem_servico_itens(ordem_id,origem,origem_id,descricao,prioridade,foto,status_origem)
+        VALUES($1,'Checklist',$2,$3,$4,$5,$6)`,
+        [oid,Number(req.params.id),`${p.item}${p.observacao?` • ${p.observacao}`:""}`,p.status==="CRITICO"?"Crítica":"Alta",p.foto||null,p.status||null]);
     }
     await c.query(`UPDATE checklists SET status_tratamento='O.S. gerada',tratado_por=$1,tratado_em=NOW(),ordem_servico_id=$2 WHERE id=$3`,
       [req.user.id,oid,req.params.id]);

@@ -402,6 +402,13 @@ async function carregarDemandasOS(prefixo){
   }catch(e){box.innerHTML=`<section class="panel"><p>Não foi possível carregar as demandas: ${fmt(e.message)}</p></section>`}
 }
 
+function abrirFotoChecklist(src,titulo="Foto da divergência") {
+  const antigo=document.getElementById("modalFotoChecklist"); if(antigo)antigo.remove();
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-bg" id="modalFotoChecklist"><div class="modal" style="max-width:850px"><div class="tire-modal-head"><div><h2>📷 ${escapeHtml(titulo)}</h2><small>Evidência registrada no checklist</small></div><button type="button" class="secondary" id="fecharFotoChecklist">✕</button></div><div style="text-align:center;padding:12px"><img src="${src}" alt="Foto da divergência" style="max-width:100%;max-height:70vh;object-fit:contain;border-radius:8px;border:1px solid #ddd"></div></div></div>`);
+  document.getElementById("fecharFotoChecklist").onclick=()=>document.getElementById("modalFotoChecklist")?.remove();
+  document.getElementById("modalFotoChecklist").onclick=e=>{if(e.target.id==="modalFotoChecklist")e.currentTarget.remove()};
+}
+
 async function abrirOS(id){
   try{
     const d=await api(`/api/ordens-servico/${id}`),o=d.ordem;
@@ -410,8 +417,8 @@ async function abrirOS(id){
       <button class="secondary" type="button" id="fecharOS">✕</button></div>
       <div class="os-statusbar"><b>Status:</b> ${fmt(o.status)} <b>Valor total:</b> R$ ${Number(o.valor_orcado||0).toFixed(2).replace(".",",")}</div>
       <p><b>Fluxo:</b> Conferência → Em orçamento → Aguardando aprovação → Aprovada → Em execução → Concluída</p>
-      <div class="table-wrap"><table><thead><tr><th>Origem</th><th>Serviço / Demanda</th><th>Prioridade</th><th>Valor R$</th><th>Status</th></tr></thead>
-      <tbody>${d.itens.map(i=>`<tr><td>${fmt(i.origem)}</td><td class="wrapcell">${fmt(i.descricao)}</td><td>${fmt(i.prioridade)}</td>
+      <div class="table-wrap"><table><thead><tr><th>Origem</th><th>Item com divergência</th><th>Classificação</th><th>Foto</th><th>Prioridade</th><th>Valor R$</th><th>Status</th></tr></thead>
+      <tbody>${d.itens.map(i=>`<tr><td>${fmt(i.origem)}</td><td class="wrapcell"><b>${fmt(i.descricao)}</b>${i.observacao_origem?`<br><small>Obs.: ${escapeHtml(i.observacao_origem)}</small>`:""}</td><td>${i.status_origem?`<b>${escapeHtml(i.status_origem)}</b>`:"-"}</td><td>${i.foto?`<button type="button" class="secondary os-foto-btn" data-foto="${escapeHtml(i.foto)}" data-foto-titulo="${escapeHtml(i.descricao)}">📷 Ver foto</button>`:"-"}</td><td>${fmt(i.prioridade)}</td>
       <td><input class="os-value" data-item="${i.id}" type="number" min="0" step="0.01" value="${Number(i.valor_estimado||0)}"></td>
       <td><select class="os-item-status" data-item="${i.id}">${["Pendente","Em orçamento","Aprovado","Em execução","Concluído"].map(s=>`<option ${s===i.status?"selected":""}>${s}</option>`).join("")}</select></td></tr>`).join("")}</tbody></table></div>
       <form id="formOS" style="margin-top:16px">
@@ -424,6 +431,7 @@ async function abrirOS(id){
       </form>
     </div></div>`);
     $("#fecharOS").onclick=$("#cancelOS").onclick=()=>$("#modalOS").remove();
+    document.querySelectorAll(".os-foto-btn").forEach(b=>b.onclick=()=>abrirFotoChecklist(b.dataset.foto,b.dataset.fotoTitulo));
     $("#imprimirOSAtual").onclick=()=>imprimirOS(id);
     $("#finalizarOSAtual").onclick=async()=>{
       if(!confirm("Finalizar esta Ordem de Serviço? Ela sairá das ordens abertas e será enviada ao histórico do veículo."))return;
@@ -734,13 +742,14 @@ async function loadTratamentoChecklist(){
       <div class="table-wrap"><table><thead><tr><th>Data</th><th>Veículo</th><th>Motorista</th><th>Alertas</th><th>Situação</th><th>O.S.</th><th>Ação</th></tr></thead>
       <tbody>${rows.map(x=>{const probs=(x.itens||[]).filter(i=>["RUIM","CRITICO"].includes(i.status));return `<tr class="${probs.length?"check-problem":""}">
         <td>${formatarDataBR(x.data_checklist)}</td><td><b>${escapeHtml(x.prefixo)}</b><br>${escapeHtml(x.placa||"")}</td><td>${escapeHtml(x.motorista||"-")}</td>
-        <td>${probs.length?`<b>🚨 ${probs.length}</b><br>${probs.map(p=>`${escapeHtml(p.item)} (${p.status})${p.foto?`<br><a href="${p.foto}" target="_blank">📷 Ver foto</a>`:""}`).join("<br>")}`:"✅ Sem pendência"}</td>
+        <td>${probs.length?`<b>🚨 ${probs.length}</b><br>${probs.map(p=>`${escapeHtml(p.item)} (${p.status})${p.foto?`<br><button type="button" class="secondary foto-check-btn" data-foto="${escapeHtml(p.foto)}" data-foto-titulo="${escapeHtml(p.item)}">📷 Ver foto</button>`:""}`).join("<br>")}`:"✅ Sem pendência"}</td>
         <td><select data-ckstatus="${x.id}">${["Pendente","Em análise","Sem pendência","Tratado","O.S. gerada"].map(st=>`<option ${x.status_tratamento===st?"selected":""} ${st==="O.S. gerada"?"disabled":""}>${st}</option>`).join("")}</select></td>
         <td>${x.ordem_servico_id?`<button class="secondary" data-open-os="${x.ordem_servico_id}">Abrir O.S.</button>`:"-"}</td>
         <td>${probs.length&&!x.ordem_servico_id?`<button class="primary" data-genck="${x.id}">📋 Gerar O.S.</button>`:""}</td></tr>`}).join("")}</tbody></table></div></section>`;
     document.querySelectorAll("[data-ckstatus]").forEach(el=>el.onchange=async()=>{try{await api(`/api/checklist-tratamento/${el.dataset.ckstatus}/status`,{method:"PUT",body:JSON.stringify({status:el.value})})}catch(e){alert(e.message)}});
     document.querySelectorAll("[data-genck]").forEach(b=>b.onclick=async()=>{if(!confirm("Gerar Ordem de Serviço com todos os itens RUIM/CRÍTICO deste checklist?"))return;try{const r=await api(`/api/checklist-tratamento/${b.dataset.genck}/gerar-os`,{method:"POST",body:"{}"});alert(`${r.numero} gerada com sucesso.`);loadTratamentoChecklist()}catch(e){alert(e.message)}});
     document.querySelectorAll("[data-open-os]").forEach(b=>b.onclick=()=>abrirOS(b.dataset.openOs));
+    document.querySelectorAll(".foto-check-btn").forEach(b=>b.onclick=()=>abrirFotoChecklist(b.dataset.foto,b.dataset.fotoTitulo));
   }catch(e){$("#content").innerHTML=`<section class="panel"><h3>Acesso restrito</h3><p>${escapeHtml(e.message)}</p></section>`}
 }
 
