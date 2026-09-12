@@ -197,21 +197,43 @@ async function loadPneus(){
   $("#pageTitle").textContent="Acompanhamento de Pneus";
   $("#content").innerHTML=`
     <section class="panel">
-      <h3>🔎 Consultar pneus por veículo</h3>
-      <form id="pneuSearch" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+      <h3>🛞 Pneus por veículo</h3>
+      <p>Selecione um veículo para visualizar somente os pneus dele. Depois, clique em qualquer pneu para ver sua posição no caminhão.</p>
+      <div id="pneuVeiculos" class="vehicle-filter-grid"><p>Carregando veículos...</p></div>
+      <form id="pneuSearch" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-top:14px">
         <div style="min-width:240px;flex:1">
-          <label style="display:block;margin-bottom:6px">Prefixo do veículo</label>
-          <input id="pneuPrefixo" placeholder="Ex.: 5043" required style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:8px">
+          <label style="display:block;margin-bottom:6px">Filtrar por veículo</label>
+          <select id="pneuPrefixo" style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:8px">
+            <option value="">Selecione o veículo</option>
+          </select>
         </div>
-        <button class="primary">Pesquisar veículo</button>
+        <button class="primary">🔎 Pesquisar</button>
         <button type="button" class="secondary" id="todosPneus">Ver todos</button>
       </form>
       <div id="pneuResultado" style="margin-top:16px"></div>
     </section>`;
-  $("#pneuSearch").onsubmit=async e=>{e.preventDefault();await pesquisarPneus($("#pneuPrefixo").value)};
+  $("#pneuSearch").onsubmit=async e=>{
+    e.preventDefault();
+    const prefixo=$("#pneuPrefixo").value;
+    if(!prefixo)return alert("Selecione um veículo.");
+    await pesquisarPneus(prefixo);
+  };
   $("#todosPneus").onclick=()=>listarTodosPneus();
+  try{
+    const veiculos=await api("/api/veiculos");
+    const ordenados=[...veiculos].sort((a,b)=>String(a.prefixo||"").localeCompare(String(b.prefixo||""),"pt-BR",{numeric:true}));
+    $("#pneuPrefixo").innerHTML=`<option value="">Selecione o veículo</option>${ordenados.map(v=>`<option value="${escapeHtml(v.prefixo)}">${escapeHtml(v.prefixo)} • ${escapeHtml(v.placa||"Sem placa")}</option>`).join("")}`;
+    $("#pneuVeiculos").innerHTML=ordenados.map(v=>`<button type="button" class="vehicle-filter-btn" data-pneu-veiculo="${escapeHtml(v.prefixo)}"><b>${escapeHtml(v.prefixo)}</b><small>${escapeHtml(v.placa||"Sem placa")}</small></button>`).join("");
+    $("#pneuVeiculos").querySelectorAll("[data-pneu-veiculo]").forEach(btn=>btn.onclick=async()=>{
+      const prefixo=btn.dataset.pneuVeiculo;
+      $("#pneuPrefixo").value=prefixo;
+      $("#pneuVeiculos").querySelectorAll(".vehicle-filter-btn").forEach(x=>x.classList.toggle("active",x===btn));
+      await pesquisarPneus(prefixo);
+    });
+  }catch(e){
+    $("#pneuVeiculos").innerHTML=`<p>Não foi possível carregar os veículos: ${fmt(e.message)}</p>`;
+  }
 }
-
 async function pesquisarPneus(prefixo){
   const box=$("#pneuResultado");
   box.innerHTML="<p>Consultando...</p>";
